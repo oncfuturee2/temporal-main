@@ -3,7 +3,8 @@
 install: bins
 
 # Rebuild binaries (used by Dockerfile).
-bins: temporal-server temporal-cassandra-tool temporal-sql-tool temporal-elasticsearch-tool tdbg
+# For concurrent builds, use: make concurrent-bins
+bins: $(BINS)
 
 # Install all tools, recompile proto files, run all possible checks and tests (long but comprehensive).
 all: clean proto bins check test
@@ -27,7 +28,7 @@ clean: clean-bins clean-tools clean-test-output
 proto: lint-protos lint-api protoc proto-codegen
 ########################################################################
 
-.PHONY: proto protoc install bins ci-build-misc clean
+.PHONY: proto protoc install bins concurrent-bins ci-build-misc clean
 
 ##### Arguments ######
 GOOS        ?= $(shell go env GOOS)
@@ -51,6 +52,21 @@ ALL_BUILD_TAGS := disable_grpc_modules,$(BUILD_TAG)
 ALL_TEST_TAGS := $(ALL_BUILD_TAGS),test_dep,$(TEST_TAG)
 BUILD_TAG_FLAG := -tags $(ALL_BUILD_TAGS)
 TEST_TAG_FLAG := -tags $(ALL_TEST_TAGS)
+
+# GO_LDFLAGS passes linker flags to strip debug information and reduce binary size.
+#   -s    Omit the symbol table.
+#   -w    Omit the DWARF debugging information.
+# Set GO_LDFLAGS= (empty) to disable stripping for debug builds (e.g. temporal-server-debug).
+GO_LDFLAGS ?= -s -w
+GIT_SHORT_HASH := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+GO_BUILD_FLAGS := -trimpath -ldflags="-X go.temporal.io/server/common/metrics.ReleaseVersion=$(GIT_SHORT_HASH) $(GO_LDFLAGS)"
+
+# Number of parallel build jobs for concurrent binary compilation.
+# Defaults to the number of available CPU cores.
+BUILD_JOBS ?= $(shell nproc 2>/dev/null || echo 4)
+
+# List of all binaries produced by the 'bins' target.
+BINS := temporal-server temporal-cassandra-tool temporal-sql-tool temporal-elasticsearch-tool tdbg
 
 # 20 minutes is the upper bound defined for all tests. (Tests in CI take up to about 14:30 now)
 # If you change this, also change .github/workflows/run-tests.yml!
@@ -344,41 +360,43 @@ update-go-api:
 ##### Binaries #####
 clean-bins:
 	@printf $(COLOR) "Delete old binaries..."
-	@rm -f temporal-server
-	@rm -f temporal-server-debug
-	@rm -f temporal-cassandra-tool
-	@rm -f tdbg
-	@rm -f fairsim
-	@rm -f temporal-sql-tool
-	@rm -f temporal-elasticsearch-tool
+	@rm -f $(BINS) temporal-server-debug fairsim
 
 temporal-server: $(ALL_SRC)
 	@printf $(COLOR) "Build temporal-server with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o temporal-server ./cmd/server
+	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) $(GO_BUILD_FLAGS) -o temporal-server ./cmd/server
 
 tdbg: $(ALL_SRC)
 	@printf $(COLOR) "Build tdbg with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o tdbg ./cmd/tools/tdbg
+	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) $(GO_BUILD_FLAGS) -o tdbg ./cmd/tools/tdbg
 
 fairsim: $(ALL_SRC)
 	@printf $(COLOR) "Build fairsim with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o fairsim ./cmd/tools/fairsim
+	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) $(GO_BUILD_FLAGS) -o fairsim ./cmd/tools/fairsim
 
 temporal-cassandra-tool: $(ALL_SRC)
 	@printf $(COLOR) "Build temporal-cassandra-tool with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o temporal-cassandra-tool ./cmd/tools/cassandra
+	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) $(GO_BUILD_FLAGS) -o temporal-cassandra-tool ./cmd/tools/cassandra
 
 temporal-sql-tool: $(ALL_SRC)
 	@printf $(COLOR) "Build temporal-sql-tool with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o temporal-sql-tool ./cmd/tools/sql
+	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) $(GO_BUILD_FLAGS) -o temporal-sql-tool ./cmd/tools/sql
 
 temporal-elasticsearch-tool: $(ALL_SRC)
 	@printf $(COLOR) "Build temporal-elasticsearch-tool with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o temporal-elasticsearch-tool ./cmd/tools/elasticsearch
+	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) $(GO_BUILD_FLAGS) -o temporal-elasticsearch-tool ./cmd/tools/elasticsearch
 
 temporal-server-debug: $(ALL_SRC)
 	@printf $(COLOR) "Build temporal-server-debug with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG),TEMPORAL_DEBUG -o temporal-server-debug ./cmd/server
+	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG),TEMPORAL_DEBUG -trimpath -o temporal-server-debug ./cmd/server
+
+##### Concurrent builds #####
+# Build all binaries concurrently using BUILD_JOBS (defaults to number of CPU cores).
+# This significantly speeds up container builds on multi-core machines.
+concurrent-bins: clean-bins
+	$(MAKE) -j$(BUILD_JOBS) $(BINS)
+
+.PHONY: concurrent-bins
 
 ##### Checks #####
 goimports: fmt-imports $(GOIMPORTS)
