@@ -36,6 +36,13 @@ GOPATH      ?= $(shell go env GOPATH)
 # Disable cgo by default.
 CGO_ENABLED ?= 0
 
+# Build optimization flags
+# -ldflags="-s -w": strip debug symbols and DWARF tables, reduces binary size significantly
+# -trimpath: removes all file system paths from compiled binaries, improves reproducibility
+LDFLAGS      ?= -s -w
+TRIMPATH     ?= true
+GO_BUILD_FLAGS ?= $(BUILD_TAG_FLAG) $(if $(filter true,$(TRIMPATH)),-trimpath,) -ldflags="$(LDFLAGS)"
+
 PERSISTENCE_TYPE ?= nosql
 PERSISTENCE_DRIVER ?= cassandra
 
@@ -354,27 +361,27 @@ clean-bins:
 
 temporal-server: $(ALL_SRC)
 	@printf $(COLOR) "Build temporal-server with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o temporal-server ./cmd/server
+	CGO_ENABLED=$(CGO_ENABLED) go build $(GO_BUILD_FLAGS) -o temporal-server ./cmd/server
 
 tdbg: $(ALL_SRC)
 	@printf $(COLOR) "Build tdbg with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o tdbg ./cmd/tools/tdbg
+	CGO_ENABLED=$(CGO_ENABLED) go build $(GO_BUILD_FLAGS) -o tdbg ./cmd/tools/tdbg
 
 fairsim: $(ALL_SRC)
 	@printf $(COLOR) "Build fairsim with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o fairsim ./cmd/tools/fairsim
+	CGO_ENABLED=$(CGO_ENABLED) go build $(GO_BUILD_FLAGS) -o fairsim ./cmd/tools/fairsim
 
 temporal-cassandra-tool: $(ALL_SRC)
 	@printf $(COLOR) "Build temporal-cassandra-tool with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o temporal-cassandra-tool ./cmd/tools/cassandra
+	CGO_ENABLED=$(CGO_ENABLED) go build $(GO_BUILD_FLAGS) -o temporal-cassandra-tool ./cmd/tools/cassandra
 
 temporal-sql-tool: $(ALL_SRC)
 	@printf $(COLOR) "Build temporal-sql-tool with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o temporal-sql-tool ./cmd/tools/sql
+	CGO_ENABLED=$(CGO_ENABLED) go build $(GO_BUILD_FLAGS) -o temporal-sql-tool ./cmd/tools/sql
 
 temporal-elasticsearch-tool: $(ALL_SRC)
 	@printf $(COLOR) "Build temporal-elasticsearch-tool with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o temporal-elasticsearch-tool ./cmd/tools/elasticsearch
+	CGO_ENABLED=$(CGO_ENABLED) go build $(GO_BUILD_FLAGS) -o temporal-elasticsearch-tool ./cmd/tools/elasticsearch
 
 temporal-server-debug: $(ALL_SRC)
 	@printf $(COLOR) "Build temporal-server-debug with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
