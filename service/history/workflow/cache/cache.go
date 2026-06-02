@@ -126,6 +126,7 @@ func NewHostLevelCache(
 		OnEvict: func(val any) {
 			//revive:disable-next-line:unchecked-type-assertion
 			item := val.(*cacheItem)
+			item.wfContext.Clear()
 			if item.finalizer == nil {
 				return // should only happen in unit tests
 			}

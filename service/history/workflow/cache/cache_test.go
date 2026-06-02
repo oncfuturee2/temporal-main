@@ -88,6 +88,8 @@ func (s *workflowCacheSuite) TestHistoryCacheBasic() {
 	}
 	mockMS1 := historyi.NewMockMutableState(s.controller)
 	mockMS1.EXPECT().IsDirty().Return(false).AnyTimes()
+	mockMS1.EXPECT().GetQueryRegistry().Return(workflow.NewQueryRegistry()).AnyTimes()
+	mockMS1.EXPECT().RemoveSpeculativeWorkflowTaskTimeoutTask().AnyTimes()
 	ctx, release, err := s.cache.GetOrCreateWorkflowExecution(
 		context.Background(),
 		s.mockShard,
@@ -598,6 +600,8 @@ func (s *workflowCacheSuite) TestCacheImpl_RejectsRequestWhenAtLimitSimple() {
 	}
 	mockMS1 := historyi.NewMockMutableState(s.controller)
 	mockMS1.EXPECT().IsDirty().Return(false).AnyTimes()
+	mockMS1.EXPECT().GetQueryRegistry().Return(workflow.NewQueryRegistry()).AnyTimes()
+	mockMS1.EXPECT().RemoveSpeculativeWorkflowTaskTimeoutTask().AnyTimes()
 	ctx, release1, err := s.cache.GetOrCreateWorkflowExecution(
 		context.Background(),
 		mockShard,
@@ -663,6 +667,8 @@ func (s *workflowCacheSuite) TestCacheImpl_RejectsRequestWhenAtLimitMultiple() {
 	}
 	mockMS1 := historyi.NewMockMutableState(s.controller)
 	mockMS1.EXPECT().IsDirty().Return(false).AnyTimes()
+	mockMS1.EXPECT().GetQueryRegistry().Return(workflow.NewQueryRegistry()).AnyTimes()
+	mockMS1.EXPECT().RemoveSpeculativeWorkflowTaskTimeoutTask().AnyTimes()
 
 	ctx, release1, err := s.cache.GetOrCreateWorkflowExecution(
 		context.Background(),
@@ -694,6 +700,8 @@ func (s *workflowCacheSuite) TestCacheImpl_RejectsRequestWhenAtLimitMultiple() {
 	}
 	mockMS2 := historyi.NewMockMutableState(s.controller)
 	mockMS2.EXPECT().IsDirty().Return(false).AnyTimes()
+	mockMS2.EXPECT().GetQueryRegistry().Return(workflow.NewQueryRegistry()).AnyTimes()
+	mockMS2.EXPECT().RemoveSpeculativeWorkflowTaskTimeoutTask().AnyTimes()
 	ctx, release2, err := s.cache.GetOrCreateWorkflowExecution(
 		context.Background(),
 		mockShard,
@@ -801,6 +809,8 @@ func (s *workflowCacheSuite) TestCacheImpl_CheckCacheLimitSizeBasedFlag() {
 	}
 	mockMS1 := historyi.NewMockMutableState(s.controller)
 	mockMS1.EXPECT().IsDirty().Return(false).AnyTimes()
+	mockMS1.EXPECT().GetQueryRegistry().Return(workflow.NewQueryRegistry()).AnyTimes()
+	mockMS1.EXPECT().RemoveSpeculativeWorkflowTaskTimeoutTask().AnyTimes()
 	ctx, release1, err := s.cache.GetOrCreateWorkflowExecution(
 		context.Background(),
 		mockShard,
@@ -891,3 +901,82 @@ func (s *workflowCacheSuite) TestCacheImpl_GetCurrentRunID_NoCurrentRun() {
 	s.Nil(ctx)
 	s.Nil(release)
 }
+
+func (s *workflowCacheSuite) TestWorkflowCache_EvictionClearsContext() {
+	namespaceID := namespace.ID("test_namespace_id")
+	execution := &commonpb.WorkflowExecution{
+		WorkflowId: "test_workflow_id",
+		RunId:      uuid.NewString(),
+	}
+
+	config := tests.NewDynamicConfig()
+	config.HistoryCacheLimitSizeBased = true
+	config.HistoryHostLevelCacheMaxSizeBytes = dynamicconfig.GetIntPropertyFn(1000)
+	config.HistoryCacheBackgroundEvict = func() dynamicconfig.CacheBackgroundEvictSettings {
+		return dynamicconfig.CacheBackgroundEvictSettings{Enabled: false}
+	}
+
+	mockShard := shard.NewTestContext(
+		s.controller,
+		&persistencespb.ShardInfo{
+			ShardId: 0,
+			RangeId: 1,
+		},
+		config,
+	)
+
+	testCache := NewHostLevelCache(config, mockShard.GetLogger(), mockShard.GetMetricsHandler())
+
+	// Get first execution and populate cache
+	wfCtx1, release1, err := testCache.GetOrCreateWorkflowExecution(
+		context.Background(),
+		mockShard,
+		namespaceID,
+		execution,
+		locks.PriorityHigh,
+	)
+	s.NoError(err)
+
+	// Inject a mock mutable state so we can observe the Clear() call
+	mockWfCtx, ok := wfCtx1.(*workflow.ContextImpl)
+	s.True(ok)
+	mockMutableState := historyi.NewMockMutableState(s.controller)
+	// Expect Clear to be called on mutable state's query registry and speculative task
+	mockQueryRegistry := workflow.NewQueryRegistry()
+	mockMutableState.EXPECT().GetQueryRegistry().Return(mockQueryRegistry).AnyTimes()
+	mockMutableState.EXPECT().RemoveSpeculativeWorkflowTaskTimeoutTask().Times(1)
+	mockMutableState.EXPECT().GetApproximatePersistedSize().Return(400).AnyTimes()
+	mockMutableState.EXPECT().IsDirty().Return(false).AnyTimes()
+	mockWfCtx.MutableState = mockMutableState
+	release1(nil)
+
+	// Now add a second item to force eviction of the first item
+	execution2 := &commonpb.WorkflowExecution{
+		WorkflowId: "test_workflow_id_2",
+		RunId:      uuid.NewString(),
+	}
+	wfCtx2, release2, err := testCache.GetOrCreateWorkflowExecution(
+		context.Background(),
+		mockShard,
+		namespaceID,
+		execution2,
+		locks.PriorityHigh,
+	)
+	s.NoError(err)
+
+	mockWfCtx2, ok := wfCtx2.(*workflow.ContextImpl)
+	s.True(ok)
+	mockMutableState2 := historyi.NewMockMutableState(s.controller)
+	mockMutableState2.EXPECT().IsDirty().Return(false).AnyTimes()
+	mockMutableState2.EXPECT().GetApproximatePersistedSize().Return(400).AnyTimes()
+	mockMutableState2.EXPECT().GetQueryRegistry().Return(mockQueryRegistry).AnyTimes()
+	mockMutableState2.EXPECT().RemoveSpeculativeWorkflowTaskTimeoutTask().AnyTimes()
+	mockWfCtx2.MutableState = mockMutableState2
+
+	release2(nil)
+
+	// Ensure the first item was cleared (MutableState set to nil)
+	s.Nil(mockWfCtx.MutableState, "MutableState should be nil after context is cleared upon cache eviction")
+}
+
+// append to the test

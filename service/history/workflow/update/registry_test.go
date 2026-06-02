@@ -955,3 +955,35 @@ func assertCompleteUpdateInRegistry(
 	assertCompleted(t, upd, successOutcome)
 	require.Equal(t, startRegistryLen-1, reg.Len(), "update should have been removed")
 }
+
+func TestRegistryClearAbortsUpdates(t *testing.T) {
+	tv := testvars.New(t)
+	reg := update.NewRegistry(emptyUpdateStore)
+
+	// Add an update
+	upd, _, err := reg.FindOrCreate(context.Background(), tv.UpdateID())
+	require.NoError(t, err)
+
+	// It should be admitted
+	req := updatepb.Request{
+		Meta: &updatepb.Meta{UpdateId: tv.UpdateID()},
+		Input: &updatepb.Input{
+			Name: "my-update",
+		},
+	}
+	err = upd.Admit(&req, mockEventStore{Controller: effect.Immediate(context.Background())})
+	require.NoError(t, err)
+
+	// Simulate cache eviction / Shard failover
+	reg.Clear()
+
+	// WaitLifecycleStage should return an error indicating the registry was cleared
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, err = upd.WaitLifecycleStage(ctx, enumspb.UPDATE_WORKFLOW_EXECUTION_LIFECYCLE_STAGE_COMPLETED, time.Second)
+	require.Error(t, err)
+	var unavailableErr *serviceerror.Unavailable
+	require.ErrorAs(t, err, &unavailableErr)
+	require.Contains(t, unavailableErr.Error(), "workflow update was aborted")
+}
