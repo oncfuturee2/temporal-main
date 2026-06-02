@@ -63,7 +63,7 @@ type (
 		// the reason for the second map being non thread safe:
 		// 1. expected number of subscriber per workflow is low, i.e. < 5
 		// 2. update to this map is already guarded by GetAndDo API provided by ConcurrentTxMap
-		eventsPubsubs collection.ConcurrentTxMap
+		eventsPubsubs collection.ConcurrentTxMap[definition.WorkflowKey, map[string]chan *Notification]
 	}
 )
 
@@ -105,12 +105,8 @@ func NewNotifier(
 	workflowIDToShardID func(namespace.ID, string) int32,
 ) *NotifierImpl {
 
-	hashFn := func(key any) uint32 {
-		notification, ok := key.(Notification)
-		if !ok {
-			return 0
-		}
-		return uint32(workflowIDToShardID(namespace.ID(notification.ID.NamespaceID), notification.ID.WorkflowID))
+	hashFn := func(key definition.WorkflowKey) uint32 {
+		return uint32(workflowIDToShardID(namespace.ID(key.NamespaceID), key.WorkflowID))
 	}
 	return &NotifierImpl{
 		timeSource:     timeSource,
@@ -121,7 +117,7 @@ func NewNotifier(
 
 		workflowIDToShardID: workflowIDToShardID,
 
-		eventsPubsubs: collection.NewShardedConcurrentTxMap(1024, hashFn),
+		eventsPubsubs: collection.NewShardedConcurrentTxMap[definition.WorkflowKey, map[string]chan *Notification](1024, hashFn),
 	}
 }
 
@@ -134,14 +130,12 @@ func (notifier *NotifierImpl) WatchHistoryEvent(
 		subscriberID: channel,
 	}
 
-	_, _, err := notifier.eventsPubsubs.PutOrDo(identifier, subscribers, func(key any, value any) error {
-		subscribers := value.(map[string]chan *Notification)
-
-		if _, ok := subscribers[subscriberID]; ok {
+	_, _, err := notifier.eventsPubsubs.PutOrDo(identifier, subscribers, func(key definition.WorkflowKey, value map[string]chan *Notification) error {
+		if _, ok := value[subscriberID]; ok {
 			// UUID collision
 			return serviceerror.NewUnavailable("Unable to watch on workflow execution.")
 		}
-		subscribers[subscriberID] = channel
+		value[subscriberID] = channel
 		return nil
 	})
 
@@ -156,17 +150,15 @@ func (notifier *NotifierImpl) UnwatchHistoryEvent(
 	identifier definition.WorkflowKey, subscriberID string) error {
 
 	success := true
-	notifier.eventsPubsubs.RemoveIf(identifier, func(key any, value any) bool {
-		subscribers := value.(map[string]chan *Notification)
-
-		if _, ok := subscribers[subscriberID]; !ok {
+	notifier.eventsPubsubs.RemoveIf(identifier, func(key definition.WorkflowKey, value map[string]chan *Notification) bool {
+		if _, ok := value[subscriberID]; !ok {
 			// cannot find the subscribe ID, which means there is a bug
 			success = false
 		} else {
-			delete(subscribers, subscriberID)
+			delete(value, subscriberID)
 		}
 
-		return len(subscribers) == 0
+		return len(value) == 0
 	})
 
 	if !success {
@@ -184,10 +176,8 @@ func (notifier *NotifierImpl) dispatchHistoryEventNotification(event *Notificati
 	defer func() {
 		metrics.HistoryEventNotificationFanoutLatency.With(notifier.metricsHandler).Record(time.Since(startTime))
 	}()
-	_, _, _ = notifier.eventsPubsubs.GetAndDo(identifier, func(key any, value any) error {
-		subscribers := value.(map[string]chan *Notification)
-
-		for _, channel := range subscribers {
+	_, _, _ = notifier.eventsPubsubs.GetAndDo(identifier, func(key definition.WorkflowKey, value map[string]chan *Notification) error {
+		for _, channel := range value {
 			select {
 			case channel <- event:
 			default:
