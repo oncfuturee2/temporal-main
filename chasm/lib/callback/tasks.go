@@ -141,8 +141,10 @@ func (h *invocationTaskHandler) Execute(
 		ref,
 		(*Callback).saveResult,
 		saveResultInput{
-			result:      result,
-			retryPolicy: h.config.RetryPolicy(),
+			result:         result,
+			retryPolicy:    h.config.RetryPolicy(),
+			config:         h.config,
+			metricsHandler: h.metricsHandler,
 		},
 	)
 	return invokable.WrapError(result, saveErr)

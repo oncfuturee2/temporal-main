@@ -9,6 +9,7 @@ import (
 	"go.temporal.io/server/chasm"
 	callbackspb "go.temporal.io/server/chasm/lib/callback/gen/callbackpb/v1"
 	"go.temporal.io/server/common/backoff"
+	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/nexus/nexusrpc"
 	queueserrors "go.temporal.io/server/service/history/queues/errors"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -109,8 +110,10 @@ func (c *Callback) loadInvocationArgs(
 }
 
 type saveResultInput struct {
-	result      invocationResult
-	retryPolicy backoff.RetryPolicy
+	result         invocationResult
+	retryPolicy    backoff.RetryPolicy
+	config         *Config
+	metricsHandler metrics.Handler
 }
 
 func (c *Callback) saveResult(
@@ -122,6 +125,22 @@ func (c *Callback) saveResult(
 		err := TransitionSucceeded.Apply(c, ctx, EventSucceeded{Time: ctx.Now(c)})
 		return nil, err
 	case invocationResultRetry:
+		// Check if we've exceeded the maximum number of attempts
+		maxAttempts := input.config.MaxAttempts()
+		// c.Attempt is the number of attempts made so far, next attempt would be c.Attempt + 1
+		if c.Attempt+1 >= int32(maxAttempts) {
+			// Record the metric for max attempts exceeded
+			if input.metricsHandler != nil {
+				input.metricsHandler.Counter(MaxAttemptsExceededCounter.Name()).Record(1)
+			}
+			// Transition to FAILED state
+			err := TransitionFailed.Apply(c, ctx, EventFailed{
+				Time: ctx.Now(c),
+				Err:  r.err,
+			})
+			return nil, err
+		}
+		// Otherwise, proceed with normal retry
 		err := TransitionAttemptFailed.Apply(c, ctx, EventAttemptFailed{
 			Time:        ctx.Now(c),
 			Err:         r.err,

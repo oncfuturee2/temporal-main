@@ -32,9 +32,16 @@ var RetryPolicyMaximumInterval = dynamicconfig.NewGlobalDurationSetting(
 	`The maximum backoff interval between every callback request attempt for a given callback.`,
 )
 
+var MaxAttempts = dynamicconfig.NewGlobalIntSetting(
+	"component.callbacks.maxAttempts",
+	10,
+	`The maximum number of attempts to make before marking a callback as permanently failed.`,
+)
+
 type Config struct {
 	RequestTimeout dynamicconfig.DurationPropertyFnWithDestinationFilter
 	RetryPolicy    func() backoff.RetryPolicy
+	MaxAttempts    func() int
 }
 
 func ConfigProvider(dc *dynamicconfig.Collection) *Config {
@@ -49,6 +56,7 @@ func ConfigProvider(dc *dynamicconfig.Collection) *Config {
 				backoff.NoInterval,
 			)
 		},
+		MaxAttempts: MaxAttempts.Get(dc),
 	}
 }
 
