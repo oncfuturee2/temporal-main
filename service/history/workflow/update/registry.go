@@ -189,16 +189,24 @@ func NewRegistry(
 	r.store.VisitUpdates(func(updID string, updInfo *persistencespb.UpdateInfo) {
 		if updInfo.GetAdmission() != nil {
 			// An Update entry in the Registry may have a request payload: we use this to write the payload to an
-			// UpdateAccepted event, in the event that the Update is accepted. However, when populating the registry
-			// from mutable state, we do not have access to Update request payloads. In this situation it is correct
-			// to create a registry entry in state Admitted with a nil payload for the following reason: the fact
-			// that we have encountered an UpdateInfo in stateAdmitted in mutable state implies that there is an
-			// UpdateAdmitted event in history; and when there is an UpdateAdmitted event in history, we will not
-			// attempt to write the request payload to the UpdateAccepted event, since the request payload is
-			// already present in the UpdateAdmitted event.
+			// UpdateAccepted event, in the event that the Update is accepted. For normal (durable) admitted updates
+			// that have an UpdateAdmitted event in history, we don't need the request payload here because it's
+			// already in the history event. For speculative (non-durable) updates, we need to restore the request
+			// payload from the persisted admission info to survive failover.
+			var reqAny *anypb.Any
+			admission := updInfo.GetAdmission()
+			if req := admission.GetRequest(); req != nil {
+				var err error
+				reqAny, err = anypb.New(req)
+				if err != nil {
+					// If we can't unmarshal the request, still create the update but with nil payload
+					// The update will be aborted if accepted, which is better than losing it entirely
+					reqAny = nil
+				}
+			}
 			r.updates[updID] = newAdmitted(
 				updID,
-				nil,
+				reqAny,
 				r.remover(updID),
 				withInstrumentation(&r.instrumentation),
 			)

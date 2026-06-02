@@ -955,3 +955,122 @@ func assertCompleteUpdateInRegistry(
 	assertCompleted(t, upd, successOutcome)
 	require.Equal(t, startRegistryLen-1, reg.Len(), "update should have been removed")
 }
+
+// TestSpeculativeUpdateSurvivesFailover verifies that speculative updates (admitted
+// without a history event, only with request payload in UpdateAdmissionInfo) survive
+// Shard failover by being reconstructed from MutableState.
+func TestSpeculativeUpdateSurvivesFailover(t *testing.T) {
+	tv := testvars.New(t)
+
+	t.Run("speculative update with request payload is reconstructed", func(t *testing.T) {
+		speculativeReq := &updatepb.Request{
+			Meta:  &updatepb.Meta{UpdateId: tv.UpdateID()},
+			Input: &updatepb.Input{Name: "test_update"},
+		}
+		reg := update.NewRegistry(&mockUpdateStore{
+			VisitUpdatesFunc: func(visitor func(updID string, updInfo *persistencespb.UpdateInfo)) {
+				visitor(
+					tv.UpdateID(),
+					&persistencespb.UpdateInfo{
+						Value: &persistencespb.UpdateInfo_Admission{
+							Admission: &persistencespb.UpdateAdmissionInfo{
+								Request: speculativeReq,
+							},
+						},
+					})
+			},
+		})
+
+		require.Equal(t, 1, reg.Len())
+		upd := reg.Find(context.Background(), tv.UpdateID())
+		require.NotNil(t, upd)
+
+		s, err := upd.WaitLifecycleStage(context.Background(), 0, 100*time.Millisecond)
+		require.NoError(t, err)
+		require.Equal(t, enumspb.UPDATE_WORKFLOW_EXECUTION_LIFECYCLE_STAGE_ADMITTED, s.Stage)
+	})
+
+	t.Run("speculative update can be accepted and completed after failover", func(t *testing.T) {
+		speculativeReq := &updatepb.Request{
+			Meta:  &updatepb.Meta{UpdateId: tv.UpdateID()},
+			Input: &updatepb.Input{Name: "test_update"},
+		}
+		evStore := mockEventStore{Controller: effect.Immediate(context.Background())}
+		reg := update.NewRegistry(&mockUpdateStore{
+			VisitUpdatesFunc: func(visitor func(updID string, updInfo *persistencespb.UpdateInfo)) {
+				visitor(
+					tv.UpdateID(),
+					&persistencespb.UpdateInfo{
+						Value: &persistencespb.UpdateInfo_Admission{
+							Admission: &persistencespb.UpdateAdmissionInfo{
+								Request: speculativeReq,
+							},
+						},
+					})
+			},
+		})
+
+		require.Equal(t, 1, reg.Len())
+		upd := reg.Find(context.Background(), tv.UpdateID())
+		require.NotNil(t, upd)
+
+		mustAccept(t, evStore, upd)
+		assertCompleteUpdateInRegistry(t, reg, evStore, upd)
+	})
+
+	t.Run("speculative update with nil request is still reconstructed (normal durable case)", func(t *testing.T) {
+		reg := update.NewRegistry(&mockUpdateStore{
+			VisitUpdatesFunc: func(visitor func(updID string, updInfo *persistencespb.UpdateInfo)) {
+				visitor(
+					tv.UpdateID(),
+					&persistencespb.UpdateInfo{
+						Value: &persistencespb.UpdateInfo_Admission{
+							Admission: &persistencespb.UpdateAdmissionInfo{},
+						},
+					})
+			},
+		})
+
+		require.Equal(t, 1, reg.Len())
+		upd := reg.Find(context.Background(), tv.UpdateID())
+		require.NotNil(t, upd)
+
+		s, err := upd.WaitLifecycleStage(context.Background(), 0, 100*time.Millisecond)
+		require.NoError(t, err)
+		require.Equal(t, enumspb.UPDATE_WORKFLOW_EXECUTION_LIFECYCLE_STAGE_ADMITTED, s.Stage)
+	})
+
+	t.Run("speculative update with history pointer and request payload prioritizes history pointer", func(t *testing.T) {
+		speculativeReq := &updatepb.Request{
+			Meta:  &updatepb.Meta{UpdateId: tv.UpdateID()},
+			Input: &updatepb.Input{Name: "test_update"},
+		}
+		reg := update.NewRegistry(&mockUpdateStore{
+			VisitUpdatesFunc: func(visitor func(updID string, updInfo *persistencespb.UpdateInfo)) {
+				visitor(
+					tv.UpdateID(),
+					&persistencespb.UpdateInfo{
+						Value: &persistencespb.UpdateInfo_Admission{
+							Admission: &persistencespb.UpdateAdmissionInfo{
+								Location: &persistencespb.UpdateAdmissionInfo_HistoryPointer_{
+									HistoryPointer: &persistencespb.UpdateAdmissionInfo_HistoryPointer{
+										EventId:      int64(42),
+										EventBatchId: int64(1),
+									},
+								},
+								Request: speculativeReq,
+							},
+						},
+					})
+			},
+		})
+
+		require.Equal(t, 1, reg.Len())
+		upd := reg.Find(context.Background(), tv.UpdateID())
+		require.NotNil(t, upd)
+
+		s, err := upd.WaitLifecycleStage(context.Background(), 0, 100*time.Millisecond)
+		require.NoError(t, err)
+		require.Equal(t, enumspb.UPDATE_WORKFLOW_EXECUTION_LIFECYCLE_STAGE_ADMITTED, s.Stage)
+	})
+}

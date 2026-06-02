@@ -1493,7 +1493,9 @@ func (ms *MutableStateImpl) VisitUpdates(visitor func(updID string, updInfo *per
 			updInfo: updInfo,
 		}
 		if adm := updInfo.GetAdmission(); adm != nil {
-			u.eventId = adm.GetHistoryPointer().EventId
+			if hp := adm.GetHistoryPointer(); hp != nil {
+				u.eventId = hp.EventId
+			}
 		} else if acc := updInfo.GetAcceptance(); acc != nil {
 			u.eventId = acc.EventId
 		} else if com := updInfo.GetCompletion(); com != nil {
@@ -5551,6 +5553,33 @@ func (ms *MutableStateImpl) AddWorkflowExecutionTerminatedEvent(
 		return nil, err
 	}
 	return event, nil
+}
+
+// AddInMemoryUpdateAdmissionInfo adds an in-memory (non-durable) UpdateAdmissionInfo to mutable state
+// without creating a history event. This is used for speculative updates that need to survive
+// MutableState rebuild after node failover.
+func (ms *MutableStateImpl) AddInMemoryUpdateAdmissionInfo(
+	updateID string,
+	request *updatepb.Request,
+) error {
+	if ms.executionInfo.UpdateInfos == nil {
+		ms.executionInfo.UpdateInfos = make(map[string]*persistencespb.UpdateInfo, 1)
+	}
+	if _, ok := ms.executionInfo.UpdateInfos[updateID]; ok {
+		return nil
+	}
+	admission := &persistencespb.UpdateInfo_Admission{
+		Admission: &persistencespb.UpdateAdmissionInfo{
+			Request: request,
+		},
+	}
+	ui := &persistencespb.UpdateInfo{Value: admission}
+	ms.executionInfo.UpdateInfos[updateID] = ui
+	ms.executionInfo.UpdateCount++
+	sizeDelta := ui.Size() + len(updateID)
+	ms.approximateSize += sizeDelta
+	ms.updateInfoUpdated[updateID] = struct{}{}
+	return nil
 }
 
 // AddWorkflowExecutionUpdateAdmittedEvent adds a WorkflowExecutionUpdateAdmittedEvent to in-memory history.

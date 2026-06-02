@@ -198,6 +198,12 @@ func (u *Updater) ApplyRequest(
 		return nil, consts.ErrWorkflowTaskStateInconsistent
 	}
 
+	// Persist the update admission info in mutable state for failover recovery
+	// This ensures the update survives Shard reload after failover
+	if err := ms.AddInMemoryUpdateAdmissionInfo(updateID, updateRequest); err != nil {
+		return nil, err
+	}
+
 	u.scheduledEventID = newWorkflowTask.ScheduledEventID
 	u.workflowTaskStamp = newWorkflowTask.Stamp
 	if _, scheduleToStartTimeoutPtr := ms.TaskQueueScheduleToStartTimeout(ms.CurrentTaskQueue().Name); scheduleToStartTimeoutPtr != nil {

@@ -842,6 +842,20 @@ func (mr *MockMutableStateMockRecorder) AddWorkflowExecutionUpdateAdmittedEvent(
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddWorkflowExecutionUpdateAdmittedEvent", reflect.TypeOf((*MockMutableState)(nil).AddWorkflowExecutionUpdateAdmittedEvent), request, origin)
 }
 
+// AddInMemoryUpdateAdmissionInfo mocks base method.
+func (m *MockMutableState) AddInMemoryUpdateAdmissionInfo(updateID string, request *update.Request) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AddInMemoryUpdateAdmissionInfo", updateID, request)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// AddInMemoryUpdateAdmissionInfo indicates an expected call of AddInMemoryUpdateAdmissionInfo.
+func (mr *MockMutableStateMockRecorder) AddInMemoryUpdateAdmissionInfo(updateID, request any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddInMemoryUpdateAdmissionInfo", reflect.TypeOf((*MockMutableState)(nil).AddInMemoryUpdateAdmissionInfo), updateID, request)
+}
+
 // AddWorkflowExecutionUpdateCompletedEvent mocks base method.
 func (m *MockMutableState) AddWorkflowExecutionUpdateCompletedEvent(acceptedEventID int64, updResp *update.Response) (*history.HistoryEvent, error) {
 	m.ctrl.T.Helper()

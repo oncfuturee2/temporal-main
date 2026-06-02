@@ -11,6 +11,7 @@ import (
 	sync "sync"
 	unsafe "unsafe"
 
+	v1 "go.temporal.io/api/update/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
@@ -33,6 +34,7 @@ type UpdateAdmissionInfo struct {
 	//
 	//	*UpdateAdmissionInfo_HistoryPointer_
 	Location      isUpdateAdmissionInfo_Location `protobuf_oneof:"location"`
+	Request       *v1.Request                    `protobuf:"bytes,2,opt,name=request,proto3" json:"request,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -92,6 +94,13 @@ type UpdateAdmissionInfo_HistoryPointer_ struct {
 }
 
 func (*UpdateAdmissionInfo_HistoryPointer_) isUpdateAdmissionInfo_Location() {}
+
+func (x *UpdateAdmissionInfo) GetRequest() *v1.Request {
+	if x != nil {
+		return x.Request
+	}
+	return nil
+}
 
 // UpdateAcceptanceInfo contains information about an accepted update
 type UpdateAcceptanceInfo struct {

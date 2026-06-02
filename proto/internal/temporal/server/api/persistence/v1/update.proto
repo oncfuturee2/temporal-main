@@ -3,14 +3,14 @@ syntax = "proto3";
 package temporal.server.api.persistence.v1;
 
 import "temporal/server/api/persistence/v1/hsm.proto";
+import "temporal/api/update/v1/message.proto";
 
 option go_package = "go.temporal.io/server/api/persistence/v1;persistence";
 
-// UpdateAdmissionInfo contains information about a durably admitted update. Note that updates in Admitted state are typically
-// non-durable (i.e. do not have a corresponding event in history). Durably admitted updates arise as a result of
-// workflow reset or history event replication conflict: in these cases a WorkflowExecutionUpdateAdmittedEvent event is
-// created when an accepted update (on one branch of workflow history) is converted into an admitted update (on another
-// branch).
+// UpdateAdmissionInfo contains information about an admitted update. Updates can be admitted
+// either durably (with a corresponding WorkflowExecutionUpdateAdmittedEvent in history, either
+// from workflow reset or replication conflict) or non-durably (speculative, in-memory only,
+// with a request payload field for recovery after node failover).
 message UpdateAdmissionInfo {
   message HistoryPointer {
     // the event ID of the WorkflowExecutionUpdateAdmittedEvent
@@ -22,6 +22,11 @@ message UpdateAdmissionInfo {
   oneof location {
     HistoryPointer history_pointer = 1;
   }
+
+  // The update request payload.
+  // Set when the update is admitted non-durably (i.e., without an UpdateAdmitted event in history)
+  // so that the request payload can be recovered after node failover.
+  temporal.api.update.v1.Request request = 2;
 }
 
 // UpdateAcceptanceInfo contains information about an accepted update
