@@ -1,26 +1,26 @@
 package tasks
 
-type testSequentialTaskQueue[T Task] struct {
+type testSequentialTaskQueue[K comparable, T Task] struct {
 	q  chan T
-	id int
+	id K
 }
 
-func newTestSequentialTaskQueue[T Task](id, capacity int) SequentialTaskQueue[T] {
-	return &testSequentialTaskQueue[T]{
+func newTestSequentialTaskQueue[K comparable, T Task](id K, capacity int) SequentialTaskQueue[K, T] {
+	return &testSequentialTaskQueue[K, T]{
 		q:  make(chan T, capacity),
 		id: id,
 	}
 }
 
-func (s *testSequentialTaskQueue[T]) ID() any {
+func (s *testSequentialTaskQueue[K, T]) ID() K {
 	return s.id
 }
 
-func (s *testSequentialTaskQueue[T]) Add(task T) {
+func (s *testSequentialTaskQueue[K, T]) Add(task T) {
 	s.q <- task
 }
 
-func (s *testSequentialTaskQueue[T]) Remove() T {
+func (s *testSequentialTaskQueue[K, T]) Remove() T {
 	select {
 	case t := <-s.q:
 		return t
@@ -30,10 +30,10 @@ func (s *testSequentialTaskQueue[T]) Remove() T {
 	}
 }
 
-func (s *testSequentialTaskQueue[T]) IsEmpty() bool {
+func (s *testSequentialTaskQueue[K, T]) IsEmpty() bool {
 	return len(s.q) == 0
 }
 
-func (s *testSequentialTaskQueue[T]) Len() int {
+func (s *testSequentialTaskQueue[K, T]) Len() int {
 	return len(s.q)
 }

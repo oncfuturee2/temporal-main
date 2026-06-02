@@ -11,16 +11,16 @@ import (
 
 type (
 	SequentialTaskQueue struct {
-		id any
+		id definition.WorkflowKey
 
 		sync.Mutex
 		taskQueue collection.Queue[TrackableExecutableTask]
 	}
 )
 
-func NewSequentialTaskQueue(task TrackableExecutableTask) ctasks.SequentialTaskQueue[TrackableExecutableTask] {
+func NewSequentialTaskQueue(task TrackableExecutableTask) ctasks.SequentialTaskQueue[definition.WorkflowKey, TrackableExecutableTask] {
 	return &SequentialTaskQueue{
-		id: task.QueueID(),
+		id: task.QueueID().(definition.WorkflowKey),
 
 		taskQueue: collection.NewPriorityQueue[TrackableExecutableTask](
 			SequentialTaskQueueCompareLess,
@@ -28,7 +28,7 @@ func NewSequentialTaskQueue(task TrackableExecutableTask) ctasks.SequentialTaskQ
 	}
 }
 
-func NewSequentialTaskQueueWithID(id any) ctasks.SequentialTaskQueue[TrackableExecutableTask] {
+func NewSequentialTaskQueueWithID(id definition.WorkflowKey) ctasks.SequentialTaskQueue[definition.WorkflowKey, TrackableExecutableTask] {
 	return &SequentialTaskQueue{
 		id: id,
 
@@ -38,7 +38,7 @@ func NewSequentialTaskQueueWithID(id any) ctasks.SequentialTaskQueue[TrackableEx
 	}
 }
 
-func (q *SequentialTaskQueue) ID() any {
+func (q *SequentialTaskQueue) ID() definition.WorkflowKey {
 	return q.id
 }
 
@@ -57,7 +57,7 @@ func (q *SequentialTaskQueue) Add(task TrackableExecutableTask) {
 func (q *SequentialTaskQueue) Remove() TrackableExecutableTask {
 	q.Lock()
 	defer q.Unlock()
-	return q.taskQueue.Remove().(TrackableExecutableTask)
+	return q.taskQueue.Remove()
 }
 
 func (q *SequentialTaskQueue) IsEmpty() bool {
@@ -77,12 +77,8 @@ func SequentialTaskQueueCompareLess(this TrackableExecutableTask, that Trackable
 }
 
 func WorkflowKeyHashFn(
-	item any,
+	item definition.WorkflowKey,
 ) uint32 {
-	workflowKey, ok := item.(definition.WorkflowKey)
-	if !ok {
-		return 0
-	}
-	idBytes := []byte(workflowKey.NamespaceID + "_" + workflowKey.WorkflowID + "_" + workflowKey.RunID)
+	idBytes := []byte(item.NamespaceID + "_" + item.WorkflowID + "_" + item.RunID)
 	return farm.Fingerprint32(idBytes)
 }

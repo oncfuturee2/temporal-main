@@ -2,6 +2,7 @@ package replication
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 
 	"github.com/dgryski/go-farm"
@@ -138,12 +139,10 @@ func replicationTaskExecutorProvider() TaskExecutorProvider {
 func replicationStreamHighPrioritySchedulerProvider(
 	config *configs.Config,
 	logger log.Logger,
-	queueFactory ctasks.SequentialTaskQueueFactory[TrackableExecutableTask],
+	queueFactory ctasks.SequentialTaskQueueFactory[definition.WorkflowKey, TrackableExecutableTask],
 	lc fx.Lifecycle,
 ) ctasks.Scheduler[TrackableExecutableTask] {
-	// SequentialScheduler has panic wrapper when executing task,
-	// if changing the executor, please make sure other executor has panic wrapper
-	scheduler := ctasks.NewSequentialScheduler[TrackableExecutableTask](
+	scheduler := ctasks.NewSequentialScheduler[definition.WorkflowKey, TrackableExecutableTask](
 		&ctasks.SequentialSchedulerOptions{
 			QueueSize:   config.ReplicationProcessorSchedulerQueueSize(),
 			WorkerCount: config.ReplicationProcessorSchedulerWorkerCount,
@@ -187,26 +186,23 @@ func replicationStreamLowPrioritySchedulerProvider(
 	// is modeled as P distinct per-namespace-workflow queue IDs. We bucket by execution (RunID) so all
 	// low-priority tasks for one execution share a queue; the third field stores the slot index, not
 	// the run UUID.
-	queueFactory := func(task TrackableExecutableTask) ctasks.SequentialTaskQueue[TrackableExecutableTask] {
+	queueFactory := func(task TrackableExecutableTask) ctasks.SequentialTaskQueue[definition.WorkflowKey, TrackableExecutableTask] {
 		item := task.QueueID()
 		workflowKey, ok := item.(definition.WorkflowKey)
 		if !ok {
-			return NewSequentialTaskQueueWithID(item)
+			wk := definition.NewWorkflowKey("", "", fmt.Sprintf("%v", item))
+			return NewSequentialTaskQueueWithID(wk)
 		}
 		parallelism := config.ReplicationLowPriorityTaskParallelism()
 		if parallelism < 1 {
 			parallelism = 1
 		}
-		// 0..parallelism-1, stable for a given RunID. Different runs of the same workflow can share
-		// a slot, so up to P sequential queues (and workers) can progress them concurrently.
 		slot := int(farm.Fingerprint32([]byte(workflowKey.RunID)) % uint32(parallelism))
 		return NewSequentialTaskQueueWithID(
 			definition.NewWorkflowKey(workflowKey.NamespaceID, workflowKey.WorkflowID, strconv.Itoa(slot)),
 		)
 	}
-	// SequentialScheduler has panic wrapper when executing task,
-	// if changing the executor, please make sure other executor has panic wrapper
-	scheduler := ctasks.NewSequentialScheduler[TrackableExecutableTask](
+	scheduler := ctasks.NewSequentialScheduler[definition.WorkflowKey, TrackableExecutableTask](
 		&ctasks.SequentialSchedulerOptions{
 			QueueSize:   config.ReplicationProcessorSchedulerQueueSize(),
 			WorkerCount: config.ReplicationLowPriorityProcessorSchedulerWorkerCount,
@@ -299,15 +295,16 @@ func sequentialTaskQueueFactoryProvider(
 	logger log.Logger,
 	metricsHandler metrics.Handler,
 	config *configs.Config,
-) ctasks.SequentialTaskQueueFactory[TrackableExecutableTask] {
-	return func(task TrackableExecutableTask) ctasks.SequentialTaskQueue[TrackableExecutableTask] {
+) ctasks.SequentialTaskQueueFactory[definition.WorkflowKey, TrackableExecutableTask] {
+	return func(task TrackableExecutableTask) ctasks.SequentialTaskQueue[definition.WorkflowKey, TrackableExecutableTask] {
 		if config.EnableReplicationTaskBatching() {
 			return NewSequentialBatchableTaskQueue(task, nil, logger, metricsHandler)
 		}
 		item := task.QueueID()
 		workflowKey, ok := item.(definition.WorkflowKey)
 		if !ok {
-			return NewSequentialTaskQueueWithID(item)
+			wk := definition.NewWorkflowKey("", "", fmt.Sprintf("%v", item))
+			return NewSequentialTaskQueueWithID(wk)
 		}
 		return NewSequentialTaskQueueWithID(
 			definition.NewWorkflowKey(workflowKey.NamespaceID, workflowKey.WorkflowID, ""),

@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"go.temporal.io/server/common/collection"
+	"go.temporal.io/server/common/definition"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/metrics"
 	ctasks "go.temporal.io/server/common/tasks"
@@ -11,7 +12,7 @@ import (
 
 type (
 	SequentialBatchableTaskQueue struct {
-		id any
+		id definition.WorkflowKey
 
 		sync.Mutex
 		taskQueue                    collection.Queue[*batchedTask]
@@ -28,9 +29,9 @@ func NewSequentialBatchableTaskQueue(
 	batchedIndividualTaskHandler func(task TrackableExecutableTask),
 	logger log.Logger,
 	metricsHandler metrics.Handler,
-) ctasks.SequentialTaskQueue[TrackableExecutableTask] {
+) ctasks.SequentialTaskQueue[definition.WorkflowKey, TrackableExecutableTask] {
 	return &SequentialBatchableTaskQueue{
-		id: task.QueueID(),
+		id: task.QueueID().(definition.WorkflowKey),
 
 		taskQueue: collection.NewPriorityQueue[*batchedTask](
 			sequentialBatchableTaskQueueCompareLess,
@@ -41,7 +42,7 @@ func NewSequentialBatchableTaskQueue(
 	}
 }
 
-func (q *SequentialBatchableTaskQueue) ID() any {
+func (q *SequentialBatchableTaskQueue) ID() definition.WorkflowKey {
 	return q.id
 }
 
@@ -51,8 +52,6 @@ func (q *SequentialBatchableTaskQueue) Peek() TrackableExecutableTask {
 	return q.taskQueue.Peek()
 }
 
-// Add will try to batch input task with the last task in the queue. Since most likely incoming task
-// are ordered by task ID, we only try to batch incoming task with last task in the queue.
 func (q *SequentialBatchableTaskQueue) Add(task TrackableExecutableTask) {
 	q.Lock()
 	defer q.Unlock()
@@ -100,10 +99,6 @@ func (q *SequentialBatchableTaskQueue) createBatchedTask(task TrackableExecutabl
 		individualTasks: []TrackableExecutableTask{task},
 		state:           batchStateOpen,
 
-		// This is to add individual task back to this queue, so it can be processed again. This is based on an assumption: only one thread is
-		// interacting with the queue. And this is a shortcut because a proper way is to resubmit the individual tasks back to scheduler.
-		// But that requires a refactor on scheduler and task lifecycle and could be risky to included in this feature implementation.
-		//
 		individualTaskHandler: func(task TrackableExecutableTask) {
 			q.Add(task)
 		},

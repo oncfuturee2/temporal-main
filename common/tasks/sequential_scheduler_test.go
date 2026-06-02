@@ -21,7 +21,7 @@ type (
 
 		controller *gomock.Controller
 
-		scheduler   *SequentialScheduler[*MockTask]
+		scheduler   *SequentialScheduler[int, *MockTask]
 		retryPolicy backoff.RetryPolicy
 	}
 )
@@ -382,14 +382,14 @@ assertionsLabel:
 		successCount, failureCount, processedCount, float64(successCount)/float64(totalTasks)*100)
 }
 
-func (s *sequentialSchedulerSuite) newTestProcessor() *SequentialScheduler[*MockTask] {
-	hashFn := func(key any) uint32 {
+func (s *sequentialSchedulerSuite) newTestProcessor() *SequentialScheduler[int, *MockTask] {
+	hashFn := func(key int) uint32 {
 		return 1
 	}
-	factory := func(task *MockTask) SequentialTaskQueue[*MockTask] {
-		return newTestSequentialTaskQueue[*MockTask](1, 3000)
+	factory := func(task *MockTask) SequentialTaskQueue[int, *MockTask] {
+		return newTestSequentialTaskQueue[int, *MockTask](1, 3000)
 	}
-	return NewSequentialScheduler[*MockTask](
+	return NewSequentialScheduler[int, *MockTask](
 		&SequentialSchedulerOptions{
 			QueueSize: 1,
 			WorkerCount: func(_ func(int)) (v int, cancel func()) {
@@ -402,14 +402,14 @@ func (s *sequentialSchedulerSuite) newTestProcessor() *SequentialScheduler[*Mock
 	)
 }
 
-func (s *sequentialSchedulerSuite) newTestProcessorWithQueueSize(queueSize int) *SequentialScheduler[*MockTask] {
-	hashFn := func(key any) uint32 {
+func (s *sequentialSchedulerSuite) newTestProcessorWithQueueSize(queueSize int) *SequentialScheduler[int, *MockTask] {
+	hashFn := func(key int) uint32 {
 		return 1
 	}
-	factory := func(task *MockTask) SequentialTaskQueue[*MockTask] {
-		return newTestSequentialTaskQueue[*MockTask](1, 3000)
+	factory := func(task *MockTask) SequentialTaskQueue[int, *MockTask] {
+		return newTestSequentialTaskQueue[int, *MockTask](1, 3000)
 	}
-	return NewSequentialScheduler[*MockTask](
+	return NewSequentialScheduler[int, *MockTask](
 		&SequentialSchedulerOptions{
 			QueueSize: queueSize,
 			WorkerCount: func(_ func(int)) (v int, cancel func()) {

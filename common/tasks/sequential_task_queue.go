@@ -1,11 +1,11 @@
 package tasks
 
 type (
-	SequentialTaskQueueFactory[T Task] func(task T) SequentialTaskQueue[T]
+	SequentialTaskQueueFactory[K comparable, T Task] func(task T) SequentialTaskQueue[K, T]
 
-	SequentialTaskQueue[T Task] interface {
+	SequentialTaskQueue[K comparable, T Task] interface {
 		// ID return the ID of the queue, as well as the tasks inside (same)
-		ID() any
+		ID() K
 		// Add push a task to the task set
 		Add(T)
 		// Remove pop a task from the task set

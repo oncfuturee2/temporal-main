@@ -13,7 +13,7 @@ import (
 	"go.temporal.io/server/common/log/tag"
 )
 
-var _ Scheduler[Task] = (*SequentialScheduler[Task])(nil)
+var _ Scheduler[Task] = (*SequentialScheduler[string, Task])(nil)
 
 const (
 	trySubmitLockTimeout = 200 * time.Millisecond
@@ -25,7 +25,7 @@ type (
 		WorkerCount dynamicconfig.TypedSubscribable[int]
 	}
 
-	SequentialScheduler[T Task] struct {
+	SequentialScheduler[K comparable, T Task] struct {
 		status       int32
 		shutdownChan chan struct{}
 		shutdownWG   sync.WaitGroup
@@ -38,21 +38,21 @@ type (
 		workerCountSubscriptionCancelFn func()
 
 		options      *SequentialSchedulerOptions
-		queues       collection.ConcurrentTxMap
-		queueFactory SequentialTaskQueueFactory[T]
-		queueChan    chan SequentialTaskQueue[T]
+		queues       collection.ConcurrentTxMap[K, SequentialTaskQueue[K, T]]
+		queueFactory SequentialTaskQueueFactory[K, T]
+		queueChan    chan SequentialTaskQueue[K, T]
 
 		logger log.Logger
 	}
 )
 
-func NewSequentialScheduler[T Task](
+func NewSequentialScheduler[K comparable, T Task](
 	options *SequentialSchedulerOptions,
-	taskQueueHashFn collection.HashFunc,
-	taskQueueFactory SequentialTaskQueueFactory[T],
+	taskQueueHashFn collection.HashFunc[K],
+	taskQueueFactory SequentialTaskQueueFactory[K, T],
 	logger log.Logger,
-) *SequentialScheduler[T] {
-	return &SequentialScheduler[T]{
+) *SequentialScheduler[K, T] {
+	return &SequentialScheduler[K, T]{
 		status:       common.DaemonStatusInitialized,
 		shutdownChan: make(chan struct{}),
 		options:      options,
@@ -60,12 +60,12 @@ func NewSequentialScheduler[T Task](
 		logger: logger,
 
 		queueFactory: taskQueueFactory,
-		queueChan:    make(chan SequentialTaskQueue[T], options.QueueSize),
-		queues:       collection.NewShardedConcurrentTxMap(1024, taskQueueHashFn),
+		queueChan:    make(chan SequentialTaskQueue[K, T], options.QueueSize),
+		queues:       collection.NewShardedConcurrentTxMap[K, SequentialTaskQueue[K, T]](1024, taskQueueHashFn),
 	}
 }
 
-func (s *SequentialScheduler[T]) Start() {
+func (s *SequentialScheduler[K, T]) Start() {
 	if !atomic.CompareAndSwapInt32(
 		&s.status,
 		common.DaemonStatusInitialized,
@@ -81,7 +81,7 @@ func (s *SequentialScheduler[T]) Start() {
 	s.logger.Info("sequential scheduler started")
 }
 
-func (s *SequentialScheduler[T]) Stop() {
+func (s *SequentialScheduler[K, T]) Stop() {
 	if !atomic.CompareAndSwapInt32(
 		&s.status,
 		common.DaemonStatusStarted,
@@ -104,15 +104,15 @@ func (s *SequentialScheduler[T]) Stop() {
 	s.logger.Info("sequential scheduler stopped")
 }
 
-func (s *SequentialScheduler[T]) Submit(task T) {
+func (s *SequentialScheduler[K, T]) Submit(task T) {
 	queue := s.queueFactory(task)
 	queue.Add(task)
 
 	_, fnEvaluated, err := s.queues.PutOrDo(
 		queue.ID(),
 		queue,
-		func(key any, value any) error {
-			value.(SequentialTaskQueue[T]).Add(task)
+		func(key K, value SequentialTaskQueue[K, T]) error {
+			value.Add(task)
 			return nil
 		},
 	)
@@ -141,7 +141,7 @@ func (s *SequentialScheduler[T]) Submit(task T) {
 }
 
 // TrySubmit use mu locking to make it thread safe which has higher latency and not suitable for high throughput
-func (s *SequentialScheduler[T]) TrySubmit(task T) bool {
+func (s *SequentialScheduler[K, T]) TrySubmit(task T) bool {
 	// Try to acquire lock with timeout to prevent concurrent TrySubmit race condition
 	lockCh := make(chan struct{}, 1)
 	unlockCh := make(chan struct{})
@@ -172,8 +172,8 @@ func (s *SequentialScheduler[T]) TrySubmit(task T) bool {
 	_, fnEvaluated, err := s.queues.PutOrDo(
 		queue.ID(),
 		queue,
-		func(key any, value any) error {
-			value.(SequentialTaskQueue[T]).Add(task)
+		func(key K, value SequentialTaskQueue[K, T]) error {
+			value.Add(task)
 			return nil
 		},
 	)
@@ -198,7 +198,7 @@ func (s *SequentialScheduler[T]) TrySubmit(task T) bool {
 	}
 }
 
-func (s *SequentialScheduler[T]) updateWorkerCount(targetWorkerNum int) {
+func (s *SequentialScheduler[K, T]) updateWorkerCount(targetWorkerNum int) {
 	s.workerLock.Lock()
 	defer s.workerLock.Unlock()
 
@@ -228,7 +228,7 @@ func (s *SequentialScheduler[T]) updateWorkerCount(targetWorkerNum int) {
 	s.logger.Info("Update worker pool size", tag.Key("worker-pool-size"), tag.Value(targetWorkerNum))
 }
 
-func (s *SequentialScheduler[T]) startWorkers(
+func (s *SequentialScheduler[K, T]) startWorkers(
 	count int,
 ) {
 	for range count {
@@ -240,7 +240,7 @@ func (s *SequentialScheduler[T]) startWorkers(
 	}
 }
 
-func (s *SequentialScheduler[T]) stopWorkers(
+func (s *SequentialScheduler[K, T]) stopWorkers(
 	count int,
 ) {
 	shutdownChToClose := s.workerShutdownCh[:count]
@@ -251,7 +251,7 @@ func (s *SequentialScheduler[T]) stopWorkers(
 	}
 }
 
-func (s *SequentialScheduler[T]) pollTaskQueue(workerShutdownCh <-chan struct{}) {
+func (s *SequentialScheduler[K, T]) pollTaskQueue(workerShutdownCh <-chan struct{}) {
 	defer s.shutdownWG.Done()
 
 	for {
@@ -267,8 +267,8 @@ func (s *SequentialScheduler[T]) pollTaskQueue(workerShutdownCh <-chan struct{})
 	}
 }
 
-func (s *SequentialScheduler[T]) processTaskQueue(
-	queue SequentialTaskQueue[T],
+func (s *SequentialScheduler[K, T]) processTaskQueue(
+	queue SequentialTaskQueue[K, T],
 	workerShutdownCh <-chan struct{},
 ) {
 	for {
@@ -293,8 +293,8 @@ func (s *SequentialScheduler[T]) processTaskQueue(
 			if !queue.IsEmpty() {
 				s.executeTask(queue)
 			} else {
-				deleted := s.queues.RemoveIf(queue.ID(), func(key any, value any) bool {
-					return value.(SequentialTaskQueue[T]).IsEmpty()
+				deleted := s.queues.RemoveIf(queue.ID(), func(key K, value SequentialTaskQueue[K, T]) bool {
+					return value.IsEmpty()
 				})
 				if deleted {
 					return
@@ -307,7 +307,7 @@ func (s *SequentialScheduler[T]) processTaskQueue(
 }
 
 // TODO: change this function to process all available tasks in the queue.
-func (s *SequentialScheduler[T]) executeTask(queue SequentialTaskQueue[T]) {
+func (s *SequentialScheduler[K, T]) executeTask(queue SequentialTaskQueue[K, T]) {
 	var panicErr error
 	defer log.CapturePanic(s.logger, &panicErr)
 	shouldRetry := true
@@ -344,7 +344,7 @@ func (s *SequentialScheduler[T]) executeTask(queue SequentialTaskQueue[T]) {
 	task.Ack()
 }
 
-func (s *SequentialScheduler[T]) drainTasks() {
+func (s *SequentialScheduler[K, T]) drainTasks() {
 LoopDrainQueues:
 	for {
 		select {
@@ -354,8 +354,8 @@ LoopDrainQueues:
 				for !queue.IsEmpty() {
 					queue.Remove().Abort()
 				}
-				deleted := s.queues.RemoveIf(queue.ID(), func(key any, value any) bool {
-					return value.(SequentialTaskQueue[T]).IsEmpty()
+				deleted := s.queues.RemoveIf(queue.ID(), func(key K, value SequentialTaskQueue[K, T]) bool {
+					return value.IsEmpty()
 				})
 				if deleted {
 					break LoopDrainSingleQueue
@@ -367,6 +367,6 @@ LoopDrainQueues:
 	}
 }
 
-func (s *SequentialScheduler[T]) isStopped() bool {
+func (s *SequentialScheduler[K, T]) isStopped() bool {
 	return atomic.LoadInt32(&s.status) == common.DaemonStatusStopped
 }
