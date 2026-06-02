@@ -3,7 +3,16 @@
 install: bins
 
 # Rebuild binaries (used by Dockerfile).
-bins: temporal-server temporal-cassandra-tool temporal-sql-tool temporal-elasticsearch-tool tdbg
+bins:
+	@printf $(COLOR) "Build core binaries with go build -p $(BUILD_JOBS)..."
+	@tmpdir=$$(mktemp -d); \
+	trap 'rm -rf "$$tmpdir"' EXIT; \
+	CGO_ENABLED=$(CGO_ENABLED) go build $(BIN_GO_BUILD_FLAGS) -o $$tmpdir/ ./cmd/server ./cmd/tools/cassandra ./cmd/tools/sql ./cmd/tools/elasticsearch ./cmd/tools/tdbg; \
+	mv $$tmpdir/server temporal-server; \
+	mv $$tmpdir/cassandra temporal-cassandra-tool; \
+	mv $$tmpdir/sql temporal-sql-tool; \
+	mv $$tmpdir/elasticsearch temporal-elasticsearch-tool; \
+	mv $$tmpdir/tdbg tdbg
 
 # Install all tools, recompile proto files, run all possible checks and tests (long but comprehensive).
 all: clean proto bins check test
@@ -27,7 +36,7 @@ clean: clean-bins clean-tools clean-test-output
 proto: lint-protos lint-api protoc proto-codegen
 ########################################################################
 
-.PHONY: proto protoc install bins ci-build-misc clean
+.PHONY: proto protoc install bins ci-build-misc clean verify-bins-optimization
 
 ##### Arguments ######
 GOOS        ?= $(shell go env GOOS)
@@ -51,6 +60,13 @@ ALL_BUILD_TAGS := disable_grpc_modules,$(BUILD_TAG)
 ALL_TEST_TAGS := $(ALL_BUILD_TAGS),test_dep,$(TEST_TAG)
 BUILD_TAG_FLAG := -tags $(ALL_BUILD_TAGS)
 TEST_TAG_FLAG := -tags $(ALL_TEST_TAGS)
+BIN_TARGETS := temporal-server temporal-cassandra-tool temporal-sql-tool temporal-elasticsearch-tool tdbg
+BUILD_CPU_COUNT ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)
+BUILD_JOBS ?= $(BUILD_CPU_COUNT)
+BIN_GO_TRIMPATH ?= true
+BIN_GO_LDFLAGS ?= -s -w
+BIN_GO_TRIMPATH_FLAG := $(if $(filter 1 on y yes t true,$(BIN_GO_TRIMPATH)),-trimpath,)
+BIN_GO_BUILD_FLAGS := $(BUILD_TAG_FLAG) -p $(BUILD_JOBS) $(BIN_GO_TRIMPATH_FLAG) $(if $(strip $(BIN_GO_LDFLAGS)),-ldflags "$(BIN_GO_LDFLAGS)",)
 
 # 20 minutes is the upper bound defined for all tests. (Tests in CI take up to about 14:30 now)
 # If you change this, also change .github/workflows/run-tests.yml!
@@ -352,33 +368,35 @@ clean-bins:
 	@rm -f temporal-sql-tool
 	@rm -f temporal-elasticsearch-tool
 
+define build-go-binary
+	@printf $(COLOR) "Build $(1) with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
+	CGO_ENABLED=$(CGO_ENABLED) go build $(BIN_GO_BUILD_FLAGS) -o $(1) $(2)
+endef
+
 temporal-server: $(ALL_SRC)
-	@printf $(COLOR) "Build temporal-server with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o temporal-server ./cmd/server
+	$(call build-go-binary,temporal-server,./cmd/server)
 
 tdbg: $(ALL_SRC)
-	@printf $(COLOR) "Build tdbg with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o tdbg ./cmd/tools/tdbg
+	$(call build-go-binary,tdbg,./cmd/tools/tdbg)
 
 fairsim: $(ALL_SRC)
-	@printf $(COLOR) "Build fairsim with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o fairsim ./cmd/tools/fairsim
+	$(call build-go-binary,fairsim,./cmd/tools/fairsim)
 
 temporal-cassandra-tool: $(ALL_SRC)
-	@printf $(COLOR) "Build temporal-cassandra-tool with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o temporal-cassandra-tool ./cmd/tools/cassandra
+	$(call build-go-binary,temporal-cassandra-tool,./cmd/tools/cassandra)
 
 temporal-sql-tool: $(ALL_SRC)
-	@printf $(COLOR) "Build temporal-sql-tool with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o temporal-sql-tool ./cmd/tools/sql
+	$(call build-go-binary,temporal-sql-tool,./cmd/tools/sql)
 
 temporal-elasticsearch-tool: $(ALL_SRC)
-	@printf $(COLOR) "Build temporal-elasticsearch-tool with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o temporal-elasticsearch-tool ./cmd/tools/elasticsearch
+	$(call build-go-binary,temporal-elasticsearch-tool,./cmd/tools/elasticsearch)
 
 temporal-server-debug: $(ALL_SRC)
 	@printf $(COLOR) "Build temporal-server-debug with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
 	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG),TEMPORAL_DEBUG -o temporal-server-debug ./cmd/server
+
+verify-bins-optimization:
+	@bash ./develop/verify_bins_optimization.sh
 
 ##### Checks #####
 goimports: fmt-imports $(GOIMPORTS)
