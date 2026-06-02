@@ -36,7 +36,13 @@ func TestNewRegistry(t *testing.T) {
 					tv.UpdateID(),
 					&persistencespb.UpdateInfo{
 						Value: &persistencespb.UpdateInfo_Admission{
-							Admission: &persistencespb.UpdateAdmissionInfo{},
+							Admission: &persistencespb.UpdateAdmissionInfo{
+								Location: &persistencespb.UpdateAdmissionInfo_HistoryPointer_{
+									HistoryPointer: &persistencespb.UpdateAdmissionInfo_HistoryPointer{
+										EventId: 10,
+									},
+								},
+							},
 						},
 					})
 			},
@@ -127,6 +133,79 @@ func TestNewRegistry(t *testing.T) {
 
 		require.Equal(t, 0, reg.Len())
 		require.Equal(t, 1, update.CompletedCount(reg))
+	})
+
+	t.Run("registry created from store with update in stateAdmitted but nil HistoryPointer aborts the update", func(t *testing.T) {
+		reg := update.NewRegistry(&mockUpdateStore{
+			VisitUpdatesFunc: func(visitor func(updID string, updInfo *persistencespb.UpdateInfo)) {
+				visitor(
+					tv.UpdateID(),
+					&persistencespb.UpdateInfo{
+						Value: &persistencespb.UpdateInfo_Admission{
+							Admission: &persistencespb.UpdateAdmissionInfo{},
+						},
+					})
+			},
+		})
+
+		require.Equal(t, 0, reg.Len())
+	})
+
+	t.Run("registry created from store with update in stateAdmitted but zero HistoryPointer aborts the update", func(t *testing.T) {
+		reg := update.NewRegistry(&mockUpdateStore{
+			VisitUpdatesFunc: func(visitor func(updID string, updInfo *persistencespb.UpdateInfo)) {
+				visitor(
+					tv.UpdateID(),
+					&persistencespb.UpdateInfo{
+						Value: &persistencespb.UpdateInfo_Admission{
+							Admission: &persistencespb.UpdateAdmissionInfo{
+								Location: &persistencespb.UpdateAdmissionInfo_HistoryPointer_{
+									HistoryPointer: &persistencespb.UpdateAdmissionInfo_HistoryPointer{
+										EventId: 0,
+									},
+								},
+							},
+						},
+					})
+			},
+		})
+
+		require.Equal(t, 0, reg.Len())
+	})
+
+	t.Run("registry created from store with update in stateAdmitted with valid HistoryPointer contains admitted update", func(t *testing.T) {
+		reg := update.NewRegistry(&mockUpdateStore{
+			VisitUpdatesFunc: func(visitor func(updID string, updInfo *persistencespb.UpdateInfo)) {
+				visitor(
+					tv.UpdateID(),
+					&persistencespb.UpdateInfo{
+						Value: &persistencespb.UpdateInfo_Admission{
+							Admission: &persistencespb.UpdateAdmissionInfo{
+								Location: &persistencespb.UpdateAdmissionInfo_HistoryPointer_{
+									HistoryPointer: &persistencespb.UpdateAdmissionInfo_HistoryPointer{
+										EventId: 10,
+									},
+								},
+							},
+						},
+					})
+			},
+		})
+		evStore := mockEventStore{Controller: effect.Immediate(context.Background())}
+
+		require.Equal(t, 1, reg.Len())
+		require.NotNil(t, reg.Find(context.Background(), tv.UpdateID()))
+
+		upd := reg.Find(context.Background(), tv.UpdateID())
+		require.NotNil(t, upd)
+
+		s, err := upd.WaitLifecycleStage(context.Background(), 0, 100*time.Millisecond)
+		require.NoError(t, err)
+		require.Equal(t, enumspb.UPDATE_WORKFLOW_EXECUTION_LIFECYCLE_STAGE_ADMITTED, s.Stage)
+
+		// ensure update can complete its lifecycle
+		mustAccept(t, evStore, upd)
+		assertCompleteUpdateInRegistry(t, reg, evStore, upd)
 	})
 }
 
@@ -652,7 +731,13 @@ func TestAbort(t *testing.T) {
 				tv.WithUpdateIDNumber(1).UpdateID(),
 				&persistencespb.UpdateInfo{
 					Value: &persistencespb.UpdateInfo_Admission{
-						Admission: &persistencespb.UpdateAdmissionInfo{},
+						Admission: &persistencespb.UpdateAdmissionInfo{
+							Location: &persistencespb.UpdateAdmissionInfo_HistoryPointer_{
+								HistoryPointer: &persistencespb.UpdateAdmissionInfo_HistoryPointer{
+									EventId: 10,
+								},
+							},
+						},
 					},
 				})
 			visitor(
@@ -662,6 +747,9 @@ func TestAbort(t *testing.T) {
 						Acceptance: &persistencespb.UpdateAcceptanceInfo{},
 					},
 				})
+		},
+		GetUpdateOutcomeFunc: func(context.Context, string) (*updatepb.Outcome, error) {
+			return nil, serviceerror.NewNotFound("not found")
 		},
 	})
 
@@ -693,9 +781,18 @@ func TestClear(t *testing.T) {
 				tv.UpdateID(),
 				&persistencespb.UpdateInfo{
 					Value: &persistencespb.UpdateInfo_Admission{
-						Admission: &persistencespb.UpdateAdmissionInfo{},
+						Admission: &persistencespb.UpdateAdmissionInfo{
+							Location: &persistencespb.UpdateAdmissionInfo_HistoryPointer_{
+								HistoryPointer: &persistencespb.UpdateAdmissionInfo_HistoryPointer{
+									EventId: 10,
+								},
+							},
+						},
 					},
 				})
+		},
+		GetUpdateOutcomeFunc: func(context.Context, string) (*updatepb.Outcome, error) {
+			return nil, serviceerror.NewNotFound("not found")
 		},
 	})
 

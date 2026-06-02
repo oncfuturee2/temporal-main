@@ -28,6 +28,7 @@ const (
 	AbortReasonWorkflowCompleted
 	AbortReasonWorkflowContinuing
 	AbortReasonWorkflowTaskFailed
+	AbortReasonSpeculativeWFTLost
 	lastAbortReason
 )
 
@@ -101,6 +102,21 @@ var reasonStateMatrix = map[reasonState]failureError{
 	reasonState{r: AbortReasonWorkflowTaskFailed, st: stateCompleted}:                           {f: nil, err: nil},
 	reasonState{r: AbortReasonWorkflowTaskFailed, st: stateProvisionallyAborted}:                {f: nil, err: nil},
 	reasonState{r: AbortReasonWorkflowTaskFailed, st: stateAborted}:                             {f: nil, err: nil},
+
+	// AbortReasonSpeculativeWFTLost is used when a speculative WFT is lost due to shard failover or restart.
+	// Updates that were admitted but not yet persisted to history (HistoryPointer is nil or zero) are aborted
+	// with a retryable error so clients can retry the update.
+	reasonState{r: AbortReasonSpeculativeWFTLost, st: stateCreated}:                             {f: nil, err: consts.ErrWorkflowClosing},
+	reasonState{r: AbortReasonSpeculativeWFTLost, st: stateProvisionallyAdmitted}:               {f: nil, err: consts.ErrWorkflowClosing},
+	reasonState{r: AbortReasonSpeculativeWFTLost, st: stateAdmitted}:                            {f: nil, err: consts.ErrWorkflowClosing},
+	reasonState{r: AbortReasonSpeculativeWFTLost, st: stateSent}:                                {f: nil, err: consts.ErrWorkflowClosing},
+	reasonState{r: AbortReasonSpeculativeWFTLost, st: stateProvisionallyAccepted}:               {f: nil, err: consts.ErrWorkflowClosing},
+	reasonState{r: AbortReasonSpeculativeWFTLost, st: stateAccepted}:                            {f: nil, err: consts.ErrWorkflowClosing},
+	reasonState{r: AbortReasonSpeculativeWFTLost, st: stateProvisionallyCompleted}:              {f: nil, err: consts.ErrWorkflowClosing},
+	reasonState{r: AbortReasonSpeculativeWFTLost, st: stateProvisionallyCompletedAfterAccepted}: {f: nil, err: consts.ErrWorkflowClosing},
+	reasonState{r: AbortReasonSpeculativeWFTLost, st: stateCompleted}:                           {f: nil, err: nil},
+	reasonState{r: AbortReasonSpeculativeWFTLost, st: stateProvisionallyAborted}:                {f: nil, err: nil},
+	reasonState{r: AbortReasonSpeculativeWFTLost, st: stateAborted}:                             {f: nil, err: nil},
 }
 
 // FailureError returns failure or error which will be set on Update futures while aborting Update.
@@ -123,6 +139,8 @@ func (r AbortReason) String() string {
 		return "WorkflowContinuing"
 	case AbortReasonWorkflowTaskFailed:
 		return "WorkflowTaskFailed"
+	case AbortReasonSpeculativeWFTLost:
+		return "SpeculativeWFTLost"
 	case lastAbortReason:
 		return fmt.Sprintf("invalid reason %d", r)
 	}

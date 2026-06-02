@@ -188,6 +188,14 @@ func NewRegistry(
 
 	r.store.VisitUpdates(func(updID string, updInfo *persistencespb.UpdateInfo) {
 		if updInfo.GetAdmission() != nil {
+			// Check if this update was ever committed to history.
+			// If HistoryPointer is nil or has EventId == 0, the update was admitted but never persisted
+			// (e.g., speculative WFT lost due to shard failover). Abort it so clients get a retryable error.
+			historyPointer := updInfo.GetAdmission().GetHistoryPointer()
+			if historyPointer == nil || historyPointer.GetEventId() == 0 {
+				r.instrumentation.countAborted(updID, AbortReasonSpeculativeWFTLost)
+				return
+			}
 			// An Update entry in the Registry may have a request payload: we use this to write the payload to an
 			// UpdateAccepted event, in the event that the Update is accepted. However, when populating the registry
 			// from mutable state, we do not have access to Update request payloads. In this situation it is correct
