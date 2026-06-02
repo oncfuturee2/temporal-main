@@ -4,15 +4,15 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.temporal.io/server/common/collection"
 )
 
-// This isn't exhaustive but serves as a basic stress test to ensure our implementation is collection
-func TestMap_MultiThreaded(t *testing.T) {
+func TestSyncMapMultiThreaded(t *testing.T) {
 	m := collection.NewSyncMap[int, int]()
 	var wg sync.WaitGroup
 	barrier := make(chan struct{})
+
 	wg.Add(5)
 	go func() {
 		defer wg.Done()
@@ -22,107 +22,98 @@ func TestMap_MultiThreaded(t *testing.T) {
 		}
 	}()
 	go func() {
-		<-barrier
 		defer wg.Done()
+		<-barrier
 		for i := range 1000 {
 			m.Get(i)
 		}
 	}()
 	go func() {
-		<-barrier
 		defer wg.Done()
+		<-barrier
 		for i := range 1000 {
 			m.GetOrSet(i, i)
 		}
 	}()
 	go func() {
-		<-barrier
 		defer wg.Done()
+		<-barrier
 		for i := range 1000 {
 			m.Pop(i)
 		}
 	}()
 	go func() {
-		<-barrier
 		defer wg.Done()
+		<-barrier
 		for range 1000 {
 			m.PopAll()
 		}
 	}()
+
 	close(barrier)
 	wg.Wait()
 }
 
-func TestMap_Get(t *testing.T) {
+func TestSyncMapGet(t *testing.T) {
 	m := collection.NewSyncMap[int, int]()
 	m.Set(1, 1)
-	v, ok := m.Get(1)
-	if !ok {
-		t.Error("Expected true, got false")
-	}
-	if v != 1 {
-		t.Errorf("Expected 1, got %v", v)
-	}
+
+	value, ok := m.Get(1)
+	require.True(t, ok)
+	require.Equal(t, 1, value)
 }
 
-func TestMap_GetOrSet(t *testing.T) {
+func TestSyncMapGetOrSet(t *testing.T) {
 	m := collection.NewSyncMap[int, int]()
 	m.Set(1, 1)
-	v, ok := m.GetOrSet(1, 2)
-	assert.True(t, ok, "expected exist key")
-	assert.Equal(t, 1, v, "expected the existing value")
 
-	v, ok = m.GetOrSet(2, 2)
-	assert.False(t, ok, "expected non exist key")
-	assert.Equal(t, 2, v, "expected the new set value")
+	value, ok := m.GetOrSet(1, 2)
+	require.True(t, ok)
+	require.Equal(t, 1, value)
 
-	v, ok = m.Get(2)
-	assert.True(t, ok, "expected exist key")
-	assert.Equal(t, 2, v, "expected the existing value")
+	value, ok = m.GetOrSet(2, 2)
+	require.False(t, ok)
+	require.Equal(t, 2, value)
+
+	value, ok = m.Get(2)
+	require.True(t, ok)
+	require.Equal(t, 2, value)
 }
 
-func TestMap_Delete(t *testing.T) {
+func TestSyncMapDelete(t *testing.T) {
 	m := collection.NewSyncMap[int, int]()
 	m.Set(1, 1)
 	m.Set(2, 1)
 	m.Delete(1)
+
 	_, ok := m.Get(1)
-	if ok {
-		t.Error("Expected false, got true")
-	}
-	v, ok := m.Get(2)
-	if !ok {
-		t.Error("Expected true, got false")
-	}
-	if v != 1 {
-		t.Errorf("Expected 1, got %v", v)
-	}
+	require.False(t, ok)
+
+	value, ok := m.Get(2)
+	require.True(t, ok)
+	require.Equal(t, 1, value)
 }
 
-func TestMap_Pop_ReturnsFalseWhenKeyDoesNotExist(t *testing.T) {
+func TestSyncMapPopReturnsFalseWhenKeyDoesNotExist(t *testing.T) {
 	m := collection.NewSyncMap[int, int]()
+
 	_, ok := m.Pop(1)
-	if ok {
-		t.Error("Expected false, got true")
-	}
+	require.False(t, ok)
 }
 
-func TestMap_Pop_ReturnsTrueWhenKeyExists(t *testing.T) {
+func TestSyncMapPopReturnsTrueWhenKeyExists(t *testing.T) {
 	m := collection.NewSyncMap[int, int]()
 	m.Set(1, 1)
-	v, ok := m.Pop(1)
-	if !ok {
-		t.Error("Expected true, got false")
-	}
-	if v != 1 {
-		t.Errorf("Expected 1, got %v", v)
-	}
+
+	value, ok := m.Pop(1)
+	require.True(t, ok)
+	require.Equal(t, 1, value)
 }
 
-func TestMap_PopAll(t *testing.T) {
+func TestSyncMapPopAll(t *testing.T) {
 	m := collection.NewSyncMap[int, int]()
 	values := m.PopAll()
-	assert.Equal(t, 0, len(values))
+	require.Len(t, values, 0)
 
 	m.Set(1, 1)
 	m.Set(2, 2)
@@ -133,13 +124,14 @@ func TestMap_PopAll(t *testing.T) {
 	mCopy := m
 
 	values = m.PopAll()
-	assert.Equal(t, 3, len(values))
+	require.Len(t, values, 3)
+
 	sum := 0
-	for _, v := range values {
-		sum += v
+	for _, value := range values {
+		sum += value
 	}
-	assert.Equal(t, 6, sum)
+	require.Equal(t, 6, sum)
 
 	_, ok := mCopy.Get(3)
-	assert.False(t, ok, "SyncMap is not correctly copyable")
+	require.False(t, ok)
 }
