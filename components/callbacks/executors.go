@@ -125,7 +125,7 @@ func (e taskExecutor) executeInvocationTask(
 	defer cancel()
 
 	result := invokable.Invoke(callCtx, ns, e, task)
-	saveErr := e.saveResult(ctx, env, ref, result)
+	saveErr := e.saveResult(ctx, env, ref, result, ns, task)
 	return invokable.WrapError(result, saveErr)
 }
 
@@ -184,6 +184,8 @@ func (e taskExecutor) saveResult(
 	env hsm.Environment,
 	ref hsm.Ref,
 	result invocationResult,
+	ns *namespace.Namespace,
+	task InvocationTask,
 ) error {
 	return env.Access(ctx, ref, hsm.AccessWrite, func(node *hsm.Node) error {
 		return hsm.MachineTransition(node, func(callback Callback) (hsm.TransitionOutput, error) {
@@ -193,12 +195,20 @@ func (e taskExecutor) saveResult(
 					Time: env.Now(),
 				})
 			case invocationResultRetry:
+				if callback.Attempt+1 >= int32(e.Config.MaxAttempts()) {
+					e.MetricsHandler.Counter(CallbackMaxAttemptsExceeded.Name()).Record(1, metrics.NamespaceTag(ns.Name().String()), metrics.DestinationTag(task.Destination()))
+					return TransitionFailed.Apply(callback, EventFailed{
+						Time: env.Now(),
+						Err:  fmt.Errorf("callback max attempts exceeded: %w", result.error()),
+					})
+				}
 				return TransitionAttemptFailed.Apply(callback, EventAttemptFailed{
 					Time:        env.Now(),
 					Err:         result.error(),
 					RetryPolicy: e.Config.RetryPolicy(),
 				})
 			case invocationResultFail:
+
 				return TransitionFailed.Apply(callback, EventFailed{
 					Time: env.Now(),
 					Err:  result.error(),

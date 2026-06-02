@@ -72,6 +72,7 @@ func TestProcessInvocationTaskNexus_Outcomes(t *testing.T) {
 		caller                callbacks.HTTPCaller
 		retryable             bool
 		expectedMetricOutcome string
+		attempt               int32
 		assertOutcome         func(*testing.T, callbacks.Callback)
 	}{
 		{
@@ -118,6 +119,18 @@ func TestProcessInvocationTaskNexus_Outcomes(t *testing.T) {
 				require.Equal(t, enumsspb.CALLBACK_STATE_FAILED, cb.State())
 			},
 		},
+		{
+			name: "max-attempts-exceeded",
+			caller: func(r *http.Request) (*http.Response, error) {
+				return nil, errors.New("fake failure")
+			},
+			retryable:             true,
+			expectedMetricOutcome: "unknown-error",
+			attempt:               9,
+			assertOutcome: func(t *testing.T, cb callbacks.Callback) {
+				require.Equal(t, enumsspb.CALLBACK_STATE_FAILED, cb.State())
+			},
+		},
 	}
 
 	for _, tc := range cases {
@@ -149,6 +162,13 @@ func TestProcessInvocationTaskNexus_Outcomes(t *testing.T) {
 				metrics.DestinationTag("http://localhost"),
 				metrics.OutcomeTag(tc.expectedMetricOutcome))
 
+			if tc.attempt == 9 && tc.retryable {
+				metricsHandler.EXPECT().Counter(callbacks.CallbackMaxAttemptsExceeded.Name()).Return(counter)
+				counter.EXPECT().Record(int64(1),
+					metrics.NamespaceTag("namespace-name"),
+					metrics.DestinationTag("http://localhost"))
+			}
+
 			root := newRoot(t)
 			cb := callbacks.Callback{
 				CallbackInfo: &persistencespb.CallbackInfo{
@@ -159,7 +179,8 @@ func TestProcessInvocationTaskNexus_Outcomes(t *testing.T) {
 							},
 						},
 					},
-					State: enumsspb.CALLBACK_STATE_SCHEDULED,
+					State:   enumsspb.CALLBACK_STATE_SCHEDULED,
+					Attempt: tc.attempt,
 				},
 			}
 			coll := callbacks.MachineCollection(root)
@@ -183,6 +204,7 @@ func TestProcessInvocationTaskNexus_Outcomes(t *testing.T) {
 						RetryPolicy: func() backoff.RetryPolicy {
 							return backoff.NewExponentialRetryPolicy(time.Second)
 						},
+						MaxAttempts: dynamicconfig.GetIntPropertyFn(10),
 					},
 				},
 			))
@@ -246,11 +268,12 @@ func TestProcessBackoffTask(t *testing.T) {
 			},
 			Logger: log.NewNoopLogger(),
 			Config: &callbacks.Config{
-				RequestTimeout: dynamicconfig.GetDurationPropertyFnFilteredByDestination(time.Second),
-				RetryPolicy: func() backoff.RetryPolicy {
-					return backoff.NewExponentialRetryPolicy(time.Second)
-				},
-			},
+						RequestTimeout: dynamicconfig.GetDurationPropertyFnFilteredByDestination(time.Second),
+						RetryPolicy: func() backoff.RetryPolicy {
+							return backoff.NewExponentialRetryPolicy(time.Second)
+						},
+						MaxAttempts: dynamicconfig.GetIntPropertyFn(10),
+					},
 		},
 	))
 
@@ -509,6 +532,7 @@ func TestProcessInvocationTaskChasm_Outcomes(t *testing.T) {
 					RetryPolicy: func() backoff.RetryPolicy {
 						return backoff.NewExponentialRetryPolicy(time.Second)
 					},
+					MaxAttempts: dynamicconfig.GetIntPropertyFn(10),
 				},
 			}))
 
