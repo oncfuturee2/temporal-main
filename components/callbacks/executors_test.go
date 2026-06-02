@@ -179,7 +179,8 @@ func TestProcessInvocationTaskNexus_Outcomes(t *testing.T) {
 					},
 					Logger: log.NewNoopLogger(),
 					Config: &callbacks.Config{
-						RequestTimeout: dynamicconfig.GetDurationPropertyFnFilteredByDestination(time.Second),
+						RequestTimeout:      dynamicconfig.GetDurationPropertyFnFilteredByDestination(time.Second),
+						MaxCallbackAttempts: dynamicconfig.GetIntPropertyFn(10),
 						RetryPolicy: func() backoff.RetryPolicy {
 							return backoff.NewExponentialRetryPolicy(time.Second)
 						},
@@ -218,6 +219,112 @@ func TestProcessInvocationTaskNexus_Outcomes(t *testing.T) {
 	}
 }
 
+func TestProcessInvocationTaskNexus_MaxAttemptsExceeded(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	namespaceRegistryMock := namespace.NewMockRegistry(ctrl)
+	factory := namespace.NewDefaultReplicationResolverFactory()
+	detail := &persistencespb.NamespaceDetail{
+		Info: &persistencespb.NamespaceInfo{
+			Id:   "namespace-id",
+			Name: "namespace-name",
+		},
+		Config: &persistencespb.NamespaceConfig{},
+	}
+	ns, err := namespace.FromPersistentState(detail, factory(detail))
+	require.NoError(t, err)
+	namespaceRegistryMock.EXPECT().GetNamespaceByID(namespace.ID("namespace-id")).Return(ns, nil)
+
+	metricsHandler := metrics.NewMockHandler(ctrl)
+	requestCounter := metrics.NewMockCounterIface(ctrl)
+	maxAttemptsCounter := metrics.NewMockCounterIface(ctrl)
+	requestTimer := metrics.NewMockTimerIface(ctrl)
+	gomock.InOrder(
+		metricsHandler.EXPECT().Counter(callbacks.RequestCounter.Name()).Return(requestCounter),
+		requestCounter.EXPECT().Record(int64(1),
+			metrics.NamespaceTag("namespace-name"),
+			metrics.DestinationTag("http://localhost"),
+			metrics.OutcomeTag("unknown-error")),
+		metricsHandler.EXPECT().Timer(callbacks.RequestLatencyHistogram.Name()).Return(requestTimer),
+		requestTimer.EXPECT().Record(gomock.Any(),
+			metrics.NamespaceTag("namespace-name"),
+			metrics.DestinationTag("http://localhost"),
+			metrics.OutcomeTag("unknown-error")),
+		metricsHandler.EXPECT().Counter(callbacks.CallbackMaxAttemptsExceeded.Name()).Return(maxAttemptsCounter),
+		maxAttemptsCounter.EXPECT().Record(int64(1),
+			metrics.NamespaceTag("namespace-name"),
+			metrics.DestinationTag("http://localhost")),
+	)
+
+	root := newRoot(t)
+	cb := callbacks.Callback{
+		CallbackInfo: &persistencespb.CallbackInfo{
+			Callback: &persistencespb.Callback{
+				Variant: &persistencespb.Callback_Nexus_{
+					Nexus: &persistencespb.Callback_Nexus{
+						Url: "http://localhost",
+					},
+				},
+			},
+			State:   enumsspb.CALLBACK_STATE_SCHEDULED,
+			Attempt: 9,
+		},
+	}
+	coll := callbacks.MachineCollection(root)
+	node, err := coll.Add("ID", cb)
+	require.NoError(t, err)
+	env := fakeEnv{node}
+
+	key := definition.NewWorkflowKey("namespace-id", "", "")
+	reg := hsm.NewRegistry()
+	require.NoError(t, callbacks.RegisterExecutor(
+		reg,
+		callbacks.TaskExecutorOptions{
+			NamespaceRegistry: namespaceRegistryMock,
+			MetricsHandler:    metricsHandler,
+			HTTPCallerProvider: func(nid queuescommon.NamespaceIDAndDestination) callbacks.HTTPCaller {
+				return func(r *http.Request) (*http.Response, error) {
+					return nil, errors.New("fake failure")
+				}
+			},
+			Logger: log.NewNoopLogger(),
+			Config: &callbacks.Config{
+				RequestTimeout:      dynamicconfig.GetDurationPropertyFnFilteredByDestination(time.Second),
+				MaxCallbackAttempts: dynamicconfig.GetIntPropertyFn(10),
+				RetryPolicy: func() backoff.RetryPolicy {
+					return backoff.NewExponentialRetryPolicy(time.Second)
+				},
+			},
+		},
+	))
+
+	err = reg.ExecuteImmediateTask(
+		context.Background(),
+		env,
+		hsm.Ref{
+			WorkflowKey: key,
+			StateMachineRef: &persistencespb.StateMachineRef{
+				Path: []*persistencespb.StateMachineKey{
+					{
+						Type: callbacks.StateMachineType,
+						Id:   "ID",
+					},
+				},
+			},
+		},
+		callbacks.NewInvocationTask("http://localhost"),
+	)
+
+	var destinationDownErr *queueserrors.DestinationDownError
+	require.ErrorAs(t, err, &destinationDownErr)
+
+	cb, err = coll.Data("ID")
+	require.NoError(t, err)
+	require.Equal(t, enumsspb.CALLBACK_STATE_FAILED, cb.State())
+	require.Equal(t, int32(10), cb.Attempt)
+	require.True(t, cb.LastAttemptFailure.GetApplicationFailureInfo().NonRetryable)
+	require.Nil(t, cb.NextAttemptScheduleTime)
+}
+
 func TestProcessBackoffTask(t *testing.T) {
 	root := newRoot(t)
 	cb := callbacks.Callback{
@@ -246,7 +353,8 @@ func TestProcessBackoffTask(t *testing.T) {
 			},
 			Logger: log.NewNoopLogger(),
 			Config: &callbacks.Config{
-				RequestTimeout: dynamicconfig.GetDurationPropertyFnFilteredByDestination(time.Second),
+				RequestTimeout:      dynamicconfig.GetDurationPropertyFnFilteredByDestination(time.Second),
+				MaxCallbackAttempts: dynamicconfig.GetIntPropertyFn(10),
 				RetryPolicy: func() backoff.RetryPolicy {
 					return backoff.NewExponentialRetryPolicy(time.Second)
 				},
@@ -505,7 +613,8 @@ func TestProcessInvocationTaskChasm_Outcomes(t *testing.T) {
 				HistoryClient:     historyClient,
 				Logger:            log.NewNoopLogger(),
 				Config: &callbacks.Config{
-					RequestTimeout: dynamicconfig.GetDurationPropertyFnFilteredByDestination(time.Second),
+					RequestTimeout:      dynamicconfig.GetDurationPropertyFnFilteredByDestination(time.Second),
+					MaxCallbackAttempts: dynamicconfig.GetIntPropertyFn(10),
 					RetryPolicy: func() backoff.RetryPolicy {
 						return backoff.NewExponentialRetryPolicy(time.Second)
 					},

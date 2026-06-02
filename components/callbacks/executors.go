@@ -125,7 +125,7 @@ func (e taskExecutor) executeInvocationTask(
 	defer cancel()
 
 	result := invokable.Invoke(callCtx, ns, e, task)
-	saveErr := e.saveResult(ctx, env, ref, result)
+	saveErr := e.saveResult(ctx, env, ref, ns, task, result)
 	return invokable.WrapError(result, saveErr)
 }
 
@@ -183,6 +183,8 @@ func (e taskExecutor) saveResult(
 	ctx context.Context,
 	env hsm.Environment,
 	ref hsm.Ref,
+	ns *namespace.Namespace,
+	task InvocationTask,
 	result invocationResult,
 ) error {
 	return env.Access(ctx, ref, hsm.AccessWrite, func(node *hsm.Node) error {
@@ -193,6 +195,14 @@ func (e taskExecutor) saveResult(
 					Time: env.Now(),
 				})
 			case invocationResultRetry:
+				nextAttempt := callback.Attempt + 1
+				if nextAttempt >= int32(e.Config.MaxCallbackAttempts()) {
+					e.recordCallbackMaxAttemptsExceeded(ns, task.Destination())
+					return TransitionFailed.Apply(callback, EventFailed{
+						Time: env.Now(),
+						Err:  result.error(),
+					})
+				}
 				return TransitionAttemptFailed.Apply(callback, EventAttemptFailed{
 					Time:        env.Now(),
 					Err:         result.error(),
@@ -208,6 +218,14 @@ func (e taskExecutor) saveResult(
 			}
 		})
 	})
+}
+
+func (e taskExecutor) recordCallbackMaxAttemptsExceeded(ns *namespace.Namespace, destination string) {
+	e.MetricsHandler.Counter(CallbackMaxAttemptsExceeded.Name()).Record(
+		1,
+		metrics.NamespaceTag(ns.Name().String()),
+		metrics.DestinationTag(destination),
+	)
 }
 
 func (e taskExecutor) executeBackoffTask(

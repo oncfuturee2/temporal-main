@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.temporal.io/server/common/dynamicconfig"
+	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/nexus"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -39,6 +41,13 @@ func Test_addressPatternToRegexp(t *testing.T) {
 			require.NoError(t, err)
 		})
 	}
+}
+
+func TestConfigProvider_MaxCallbackAttemptsDefault(t *testing.T) {
+	dc := dynamicconfig.NewCollection(dynamicconfig.StaticClient{}, log.NewNoopLogger())
+	cfg := ConfigProvider(dc)
+
+	require.Equal(t, 10, cfg.MaxCallbackAttempts())
 }
 
 func TestAddressMatchRules_Validate(t *testing.T) {
