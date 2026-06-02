@@ -147,6 +147,11 @@ func (c *ContextImpl) LoadMutableState(ctx context.Context, shardContext history
 	}
 
 	if c.MutableState == nil {
+		if c.updateRegistry != nil {
+			c.updateRegistry.Clear()
+			c.updateRegistry = nil
+		}
+
 		response, err := getWorkflowExecution(ctx, shardContext, &persistence.GetWorkflowExecutionRequest{
 			ShardID:     shardContext.GetShardID(),
 			NamespaceID: c.workflowKey.NamespaceID,

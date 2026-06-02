@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	enumspb "go.temporal.io/api/enums/v1"
 	historypb "go.temporal.io/api/history/v1"
+	updatepb "go.temporal.io/api/update/v1"
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	historyspb "go.temporal.io/server/api/history/v1"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
@@ -17,6 +18,7 @@ import (
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/cluster"
 	"go.temporal.io/server/common/definition"
+	"go.temporal.io/server/common/effect"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/persistence"
@@ -25,6 +27,7 @@ import (
 	"go.temporal.io/server/service/history/shard"
 	"go.temporal.io/server/service/history/tasks"
 	"go.temporal.io/server/service/history/tests"
+	"go.temporal.io/server/service/history/workflow/update"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -436,7 +439,7 @@ func (s *contextSuite) TestMergeReplicationTasks_OnlyNewRunHasReplicationTasks()
 	s.Len(newWorkflowSnapshot.Tasks[tasks.CategoryReplication], 1) // verify no change to tasks
 }
 
-func (s *contextSuite) TestRefreshTask() {
+func (s *contextSuite) TestRefreshTasks() {
 	now := time.Now()
 
 	baseMutableState := &persistencespb.WorkflowMutableState{
@@ -578,4 +581,80 @@ func (s *contextSuite) TestRefreshTask() {
 			s.NoError(err)
 		})
 	}
+}
+
+func (s *contextSuite) TestLoadMutableStateClearsStaleUpdateRegistry() {
+	now := time.Now().UTC()
+	persistedState := &persistencespb.WorkflowMutableState{
+		ExecutionInfo: &persistencespb.WorkflowExecutionInfo{
+			NamespaceId: tests.NamespaceID.String(),
+			WorkflowId:  tests.WorkflowID,
+			VersionHistories: &historyspb.VersionHistories{
+				Histories: []*historyspb.VersionHistory{
+					{
+						BranchToken: []byte("token#1"),
+						Items: []*historyspb.VersionHistoryItem{
+							{EventId: 2, Version: common.EmptyVersion},
+						},
+					},
+				},
+			},
+			ExecutionTime: timestamppb.New(now),
+			TransitionHistory: []*persistencespb.VersionedTransition{
+				{
+					NamespaceFailoverVersion: common.EmptyVersion,
+					TransitionCount:          1,
+				},
+			},
+			ExecutionStats: &persistencespb.ExecutionStats{HistorySize: 128},
+		},
+		ExecutionState: &persistencespb.WorkflowExecutionState{
+			RunId:     tests.RunID,
+			State:     enumsspb.WORKFLOW_EXECUTION_STATE_RUNNING,
+			Status:    enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING,
+			StartTime: timestamppb.New(now),
+		},
+		NextEventId: 3,
+	}
+
+	loadedMutableState, err := NewMutableStateFromDB(
+		s.mockShard,
+		s.mockShard.MockEventsCache,
+		s.mockShard.GetLogger(),
+		tests.LocalNamespaceEntry,
+		common.CloneProto(persistedState),
+		1,
+	)
+	s.NoError(err)
+	s.workflowContext.MutableState = loadedMutableState
+
+	registry := s.workflowContext.UpdateRegistry(context.Background())
+	upd, alreadyExisted, err := registry.FindOrCreate(context.Background(), "update-id")
+	s.NoError(err)
+	s.False(alreadyExisted)
+	s.NoError(upd.Admit(
+		&updatepb.Request{
+			Meta:  &updatepb.Meta{UpdateId: "update-id"},
+			Input: &updatepb.Input{Name: "not_empty"},
+		},
+		WithEffects(effect.Immediate(context.Background()), loadedMutableState),
+	))
+
+	s.workflowContext.MutableState = nil
+	s.mockShard.Resource.ExecutionMgr.EXPECT().GetWorkflowExecution(gomock.Any(), gomock.Any()).Return(&persistence.GetWorkflowExecutionResponse{
+		State:           common.CloneProto(persistedState),
+		DBRecordVersion: 2,
+	}, nil)
+
+	_, err = s.workflowContext.LoadMutableState(context.Background(), s.mockShard)
+	s.NoError(err)
+	s.Nil(s.workflowContext.updateRegistry)
+
+	status, err := upd.WaitLifecycleStage(
+		context.Background(),
+		enumspb.UPDATE_WORKFLOW_EXECUTION_LIFECYCLE_STAGE_ACCEPTED,
+		10*time.Millisecond,
+	)
+	s.Nil(status)
+	s.EqualExportedValues(update.AbortedByServerErr, err)
 }
