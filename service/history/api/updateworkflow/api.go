@@ -165,6 +165,13 @@ func (u *Updater) ApplyRequest(
 		return nil, err
 	}
 
+	// Persist the admitted Update to the database, so that it survives Shard failover/restart
+	if !alreadyExisted {
+		if _, err := ms.AddWorkflowExecutionUpdateAdmittedEvent(updateRequest, enumspb.UPDATE_ADMITTED_EVENT_ORIGIN_UNSPECIFIED); err != nil {
+			return nil, err
+		}
+	}
+
 	callbacksAttached, err := u.upd.AttachCallbacks(updateRequest, workflow.WithEffects(effect.Immediate(ctx), ms))
 	if err != nil {
 		return nil, err
