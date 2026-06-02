@@ -3,7 +3,9 @@
 install: bins
 
 # Rebuild binaries (used by Dockerfile).
-bins: temporal-server temporal-cassandra-tool temporal-sql-tool temporal-elasticsearch-tool tdbg
+BINS_TARGETS := temporal-server temporal-cassandra-tool temporal-sql-tool temporal-elasticsearch-tool tdbg
+bins:
+	@$(MAKE) -j$(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4) $(BINS_TARGETS)
 
 # Install all tools, recompile proto files, run all possible checks and tests (long but comprehensive).
 all: clean proto bins check test
@@ -280,7 +282,7 @@ $(STAMPDIR)/protoc-gen-go-helpers-$(GO_API_VER): | $(STAMPDIR) $(LOCALBIN)
 $(PROTOC_GEN_GO_HELPERS): $(STAMPDIR)/protoc-gen-go-helpers-$(GO_API_VER)
 
 $(LOCALBIN)/protoc-gen-go-chasm: $(LOCALBIN) cmd/tools/protoc-gen-go-chasm/main.go go.mod go.sum
-	@go build -o $@ ./cmd/tools/protoc-gen-go-chasm
+	@go build -trimpath -ldflags="-s -w" -o $@ ./cmd/tools/protoc-gen-go-chasm
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary (ideally with version)
@@ -354,31 +356,31 @@ clean-bins:
 
 temporal-server: $(ALL_SRC)
 	@printf $(COLOR) "Build temporal-server with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o temporal-server ./cmd/server
+	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -trimpath -ldflags="-s -w" -o temporal-server ./cmd/server
 
 tdbg: $(ALL_SRC)
 	@printf $(COLOR) "Build tdbg with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o tdbg ./cmd/tools/tdbg
+	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -trimpath -ldflags="-s -w" -o tdbg ./cmd/tools/tdbg
 
 fairsim: $(ALL_SRC)
 	@printf $(COLOR) "Build fairsim with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o fairsim ./cmd/tools/fairsim
+	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -trimpath -ldflags="-s -w" -o fairsim ./cmd/tools/fairsim
 
 temporal-cassandra-tool: $(ALL_SRC)
 	@printf $(COLOR) "Build temporal-cassandra-tool with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o temporal-cassandra-tool ./cmd/tools/cassandra
+	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -trimpath -ldflags="-s -w" -o temporal-cassandra-tool ./cmd/tools/cassandra
 
 temporal-sql-tool: $(ALL_SRC)
 	@printf $(COLOR) "Build temporal-sql-tool with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o temporal-sql-tool ./cmd/tools/sql
+	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -trimpath -ldflags="-s -w" -o temporal-sql-tool ./cmd/tools/sql
 
 temporal-elasticsearch-tool: $(ALL_SRC)
 	@printf $(COLOR) "Build temporal-elasticsearch-tool with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o temporal-elasticsearch-tool ./cmd/tools/elasticsearch
+	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -trimpath -ldflags="-s -w" -o temporal-elasticsearch-tool ./cmd/tools/elasticsearch
 
 temporal-server-debug: $(ALL_SRC)
 	@printf $(COLOR) "Build temporal-server-debug with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG),TEMPORAL_DEBUG -o temporal-server-debug ./cmd/server
+	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG),TEMPORAL_DEBUG -trimpath -ldflags="-s -w" -o temporal-server-debug ./cmd/server
 
 ##### Checks #####
 goimports: fmt-imports $(GOIMPORTS)
