@@ -125,7 +125,7 @@ func (e taskExecutor) executeInvocationTask(
 	defer cancel()
 
 	result := invokable.Invoke(callCtx, ns, e, task)
-	saveErr := e.saveResult(ctx, env, ref, result)
+	saveErr := e.saveResult(ctx, env, ref, result, task.Destination())
 	return invokable.WrapError(result, saveErr)
 }
 
@@ -184,6 +184,7 @@ func (e taskExecutor) saveResult(
 	env hsm.Environment,
 	ref hsm.Ref,
 	result invocationResult,
+	destination string,
 ) error {
 	return env.Access(ctx, ref, hsm.AccessWrite, func(node *hsm.Node) error {
 		return hsm.MachineTransition(node, func(callback Callback) (hsm.TransitionOutput, error) {
@@ -193,6 +194,21 @@ func (e taskExecutor) saveResult(
 					Time: env.Now(),
 				})
 			case invocationResultRetry:
+				if int32(e.Config.MaxCallbackAttempts()) > 0 && callback.Attempt >= int32(e.Config.MaxCallbackAttempts()) {
+					ns, nsErr := e.NamespaceRegistry.GetNamespaceByID(namespace.ID(ref.WorkflowKey.NamespaceID))
+					if nsErr != nil {
+						return hsm.TransitionOutput{}, fmt.Errorf("failed to get namespace by ID for max attempts metric: %w", nsErr)
+					}
+					e.MetricsHandler.Counter(CallbackMaxAttemptsExceeded.Name()).Record(
+						int64(1),
+						metrics.NamespaceTag(ns.Name().String()),
+						metrics.DestinationTag(destination),
+					)
+					return TransitionFailed.Apply(callback, EventFailed{
+						Time: env.Now(),
+						Err:  fmt.Errorf("max callback attempts exceeded (%d)", e.Config.MaxCallbackAttempts()),
+					})
+				}
 				return TransitionAttemptFailed.Apply(callback, EventAttemptFailed{
 					Time:        env.Now(),
 					Err:         result.error(),
