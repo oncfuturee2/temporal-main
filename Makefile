@@ -3,7 +3,26 @@
 install: bins
 
 # Rebuild binaries (used by Dockerfile).
-bins: temporal-server temporal-cassandra-tool temporal-sql-tool temporal-elasticsearch-tool tdbg
+# When PARALLEL_BINS=1, builds all binaries in parallel using $(MAKE) -j with CPU core count
+# When PARALLEL_BINS=0, builds sequentially (legacy behavior)
+bins:
+ifeq ($(PARALLEL_BINS),1)
+	@printf $(COLOR) "Building all binaries in parallel (STRIP_SYMBOLS=$(STRIP_SYMBOLS), TRIM_PATH=$(TRIM_PATH))..."
+	@$(MAKE) --no-print-directory -j$$(nproc 2>/dev/null || echo 4) \
+		temporal-server \
+		temporal-cassandra-tool \
+		temporal-sql-tool \
+		temporal-elasticsearch-tool \
+		tdbg
+else
+	@printf $(COLOR) "Building all binaries sequentially..."
+	@$(MAKE) --no-print-directory \
+		temporal-server \
+		temporal-cassandra-tool \
+		temporal-sql-tool \
+		temporal-elasticsearch-tool \
+		tdbg
+endif
 
 # Install all tools, recompile proto files, run all possible checks and tests (long but comprehensive).
 all: clean proto bins check test
@@ -60,6 +79,25 @@ TEST_TIMEOUT ?= 35m
 
 # Number of retries for *-coverage targets.
 MAX_TEST_ATTEMPTS ?= 3
+
+# Build optimization flags
+# STRIP_SYMBOLS: Strip symbol tables and debug info (reduces binary size by ~30-40%)
+STRIP_SYMBOLS ?= 1
+# TRIM_PATH: Remove local file system paths from binary (security + reproducibility)
+TRIM_PATH ?= 1
+# PARALLEL_BINS: Build binaries in parallel using available CPU cores
+PARALLEL_BINS ?= 1
+
+# Conditional build flags
+ifeq ($(STRIP_SYMBOLS),1)
+  LDFLAGS += -s -w
+endif
+ifeq ($(TRIM_PATH),1)
+  TRIMPATH_FLAG := -trimpath
+endif
+
+# Aggregate all build flags
+BUILD_FLAGS := $(BUILD_TAG_FLAG) $(TRIMPATH_FLAG) $(if $(LDFLAGS),-ldflags="$(LDFLAGS)")
 
 # Whether or not to test with the race detector. All of (1 on y yes t true) are true values.
 TEST_RACE_FLAG ?= on
@@ -354,27 +392,27 @@ clean-bins:
 
 temporal-server: $(ALL_SRC)
 	@printf $(COLOR) "Build temporal-server with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o temporal-server ./cmd/server
+	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_FLAGS) -o temporal-server ./cmd/server
 
 tdbg: $(ALL_SRC)
 	@printf $(COLOR) "Build tdbg with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o tdbg ./cmd/tools/tdbg
+	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_FLAGS) -o tdbg ./cmd/tools/tdbg
 
 fairsim: $(ALL_SRC)
 	@printf $(COLOR) "Build fairsim with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o fairsim ./cmd/tools/fairsim
+	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_FLAGS) -o fairsim ./cmd/tools/fairsim
 
 temporal-cassandra-tool: $(ALL_SRC)
 	@printf $(COLOR) "Build temporal-cassandra-tool with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o temporal-cassandra-tool ./cmd/tools/cassandra
+	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_FLAGS) -o temporal-cassandra-tool ./cmd/tools/cassandra
 
 temporal-sql-tool: $(ALL_SRC)
 	@printf $(COLOR) "Build temporal-sql-tool with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o temporal-sql-tool ./cmd/tools/sql
+	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_FLAGS) -o temporal-sql-tool ./cmd/tools/sql
 
 temporal-elasticsearch-tool: $(ALL_SRC)
 	@printf $(COLOR) "Build temporal-elasticsearch-tool with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
-	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_TAG_FLAG) -o temporal-elasticsearch-tool ./cmd/tools/elasticsearch
+	CGO_ENABLED=$(CGO_ENABLED) go build $(BUILD_FLAGS) -o temporal-elasticsearch-tool ./cmd/tools/elasticsearch
 
 temporal-server-debug: $(ALL_SRC)
 	@printf $(COLOR) "Build temporal-server-debug with CGO_ENABLED=$(CGO_ENABLED) for $(GOOS)/$(GOARCH)..."
