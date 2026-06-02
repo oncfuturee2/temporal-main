@@ -16,59 +16,59 @@ type (
 	}
 
 	// HashFunc represents a hash function for string
-	HashFunc func(any) uint32
+	HashFunc[K any] func(K) uint32
 
 	// ActionFunc take a key and value, do calculation and return err
-	ActionFunc func(key any, value any) error
+	ActionFunc[K any, V any] func(key K, value V) error
 	// PredicateFunc take a key and value, do calculation and return boolean
-	PredicateFunc func(key any, value any) bool
+	PredicateFunc[K any, V any] func(key K, value V) bool
 
 	// ConcurrentTxMap is a generic interface for any implementation of a dictionary
 	// or a key value lookup table that is thread safe, and providing functionality
 	// to modify key / value pair inside within a transaction
-	ConcurrentTxMap interface {
+	ConcurrentTxMap[K comparable, V any] interface {
 		// Get returns the value for the given key
-		Get(key any) (any, bool)
+		Get(key K) (V, bool)
 		// Contains returns true if the key exist and false otherwise
-		Contains(key any) bool
+		Contains(key K) bool
 		// Put records the mapping from given key to value
-		Put(key any, value any)
+		Put(key K, value V)
 		// PutIfNotExist records the key value mapping only
 		// if the mapping does not already exist
-		PutIfNotExist(key any, value any) bool
+		PutIfNotExist(key K, value V) bool
 		// Remove deletes the key from the map
-		Remove(key any)
+		Remove(key K)
 		// GetAndDo returns the value corresponding to the key, and apply fn to key value before return value
 		// return (value, value exist or not, error when evaluation fn)
-		GetAndDo(key any, fn ActionFunc) (any, bool, error)
+		GetAndDo(key K, fn ActionFunc[K, V]) (V, bool, error)
 		// PutOrDo put the key value in the map, if key does not exists, otherwise, call fn with existing key and value
 		// return (value, fn evaluated or not, error when evaluation fn)
-		PutOrDo(key any, value any, fn ActionFunc) (any, bool, error)
+		PutOrDo(key K, value V, fn ActionFunc[K, V]) (V, bool, error)
 		// RemoveIf deletes the given key from the map if fn return true
 		// return whether the key is removed or not
-		RemoveIf(key any, fn PredicateFunc) bool
+		RemoveIf(key K, fn PredicateFunc[K, V]) bool
 		// Iter returns an iterator to the map
-		Iter() MapIterator
+		Iter() MapIterator[K, V]
 		// Len returns the number of items in the map
 		Len() int
 	}
 
 	// MapIterator represents the interface for map iterators
-	MapIterator interface {
+	MapIterator[K any, V any] interface {
 		// Close closes the iterator
 		// and releases any allocated resources
 		Close()
 		// Entries returns a channel of MapEntry
 		// objects that can be used in a range loop
-		Entries() <-chan *MapEntry
+		Entries() <-chan *MapEntry[K, V]
 	}
 
 	// MapEntry represents a key-value entry within the map
-	MapEntry struct {
+	MapEntry[K any, V any] struct {
 		// Key represents the key
-		Key any
+		Key K
 		// Value represents the value
-		Value any
+		Value V
 	}
 )
 

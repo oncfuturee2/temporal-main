@@ -63,7 +63,7 @@ func (s *processorSuite) SetupTest() {
 	s.esProcessor = NewProcessor(cfg, s.mockESClient, logger, s.mockMetricHandler)
 
 	// esProcessor.Start mock
-	s.esProcessor.mapToAckFuture = collection.NewShardedConcurrentTxMap(1024, s.esProcessor.hashFn)
+	s.esProcessor.mapToAckFuture = collection.NewShardedConcurrentTxMap[string, *ackFuture](1024, s.esProcessor.hashFn)
 	s.esProcessor.bulkProcessor = s.mockBulkProcessor
 	s.esProcessor.status = common.DaemonStatusStarted
 }
@@ -428,7 +428,6 @@ func (s *processorSuite) TestNackChan() {
 }
 
 func (s *processorSuite) TestHashFn() {
-	s.Equal(uint32(0), s.esProcessor.hashFn(0))
 	s.NotEqual(uint32(0), s.esProcessor.hashFn("test"))
 }
 

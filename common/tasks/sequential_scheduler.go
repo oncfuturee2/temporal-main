@@ -38,7 +38,7 @@ type (
 		workerCountSubscriptionCancelFn func()
 
 		options      *SequentialSchedulerOptions
-		queues       collection.ConcurrentTxMap
+		queues       collection.ConcurrentTxMap[any, SequentialTaskQueue[T]]
 		queueFactory SequentialTaskQueueFactory[T]
 		queueChan    chan SequentialTaskQueue[T]
 
@@ -48,7 +48,7 @@ type (
 
 func NewSequentialScheduler[T Task](
 	options *SequentialSchedulerOptions,
-	taskQueueHashFn collection.HashFunc,
+	taskQueueHashFn collection.HashFunc[any],
 	taskQueueFactory SequentialTaskQueueFactory[T],
 	logger log.Logger,
 ) *SequentialScheduler[T] {
@@ -61,7 +61,7 @@ func NewSequentialScheduler[T Task](
 
 		queueFactory: taskQueueFactory,
 		queueChan:    make(chan SequentialTaskQueue[T], options.QueueSize),
-		queues:       collection.NewShardedConcurrentTxMap(1024, taskQueueHashFn),
+		queues:       collection.NewShardedConcurrentTxMap[any, SequentialTaskQueue[T]](1024, taskQueueHashFn),
 	}
 }
 
@@ -111,8 +111,8 @@ func (s *SequentialScheduler[T]) Submit(task T) {
 	_, fnEvaluated, err := s.queues.PutOrDo(
 		queue.ID(),
 		queue,
-		func(key any, value any) error {
-			value.(SequentialTaskQueue[T]).Add(task)
+		func(key any, value SequentialTaskQueue[T]) error {
+			value.Add(task)
 			return nil
 		},
 	)
@@ -172,8 +172,8 @@ func (s *SequentialScheduler[T]) TrySubmit(task T) bool {
 	_, fnEvaluated, err := s.queues.PutOrDo(
 		queue.ID(),
 		queue,
-		func(key any, value any) error {
-			value.(SequentialTaskQueue[T]).Add(task)
+		func(key any, value SequentialTaskQueue[T]) error {
+			value.Add(task)
 			return nil
 		},
 	)
@@ -293,8 +293,8 @@ func (s *SequentialScheduler[T]) processTaskQueue(
 			if !queue.IsEmpty() {
 				s.executeTask(queue)
 			} else {
-				deleted := s.queues.RemoveIf(queue.ID(), func(key any, value any) bool {
-					return value.(SequentialTaskQueue[T]).IsEmpty()
+				deleted := s.queues.RemoveIf(queue.ID(), func(key any, value SequentialTaskQueue[T]) bool {
+					return value.IsEmpty()
 				})
 				if deleted {
 					return
@@ -354,8 +354,8 @@ LoopDrainQueues:
 				for !queue.IsEmpty() {
 					queue.Remove().Abort()
 				}
-				deleted := s.queues.RemoveIf(queue.ID(), func(key any, value any) bool {
-					return value.(SequentialTaskQueue[T]).IsEmpty()
+				deleted := s.queues.RemoveIf(queue.ID(), func(key any, value SequentialTaskQueue[T]) bool {
+					return value.IsEmpty()
 				})
 				if deleted {
 					break LoopDrainSingleQueue

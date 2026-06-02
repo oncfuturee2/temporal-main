@@ -30,7 +30,7 @@ func (s *ConcurrentTxMapSuite) SetupTest() {
 }
 
 func (s *ConcurrentTxMapSuite) TestLen() {
-	testMap := NewShardedConcurrentTxMap(1, UUIDHashCode)
+	testMap := NewShardedConcurrentTxMap[string, boolType](1, UUIDHashCode)
 
 	key1 := "0001"
 	testMap.Put(key1, boolType(true))
@@ -54,83 +54,76 @@ func (s *ConcurrentTxMapSuite) TestLen() {
 }
 
 func (s *ConcurrentTxMapSuite) TestGetAndDo() {
-	testMap := NewShardedConcurrentTxMap(1, UUIDHashCode)
+	testMap := NewShardedConcurrentTxMap[string, *intType](1, UUIDHashCode)
 	key := uuid.NewString()
 	var value intType
 	fnApplied := false
 
-	interf, ok, err := testMap.GetAndDo(key, func(key any, value any) error {
+	val, ok, err := testMap.GetAndDo(key, func(k string, v *intType) error {
 		fnApplied = true
 		return nil
 	})
-	s.Nil(interf, "GetAndDo should return nil when key not found")
+	s.Nil(val, "GetAndDo should return nil when key not found")
 	s.Nil(err, "GetAndDo should return nil when function not applied")
 	s.False(ok, "GetAndDo should return false when key not found")
 	s.False(fnApplied, "GetAndDo should not apply function when key not exixts")
 
 	value = intType(1)
 	testMap.Put(key, &value)
-	interf, ok, err = testMap.GetAndDo(key, func(key any, value any) error {
+	val, ok, err = testMap.GetAndDo(key, func(k string, v *intType) error {
 		fnApplied = true
-		intValue := value.(*intType)
-		*intValue++
+		*v++
 		return errors.New("some err")
 	})
 
-	value1 := interf.(*intType)
-	s.Equal(*(value1), intType(2))
+	s.Equal(*val, intType(2))
 	s.NotNil(err, "GetAndDo should return non nil when function applied")
 	s.True(ok, "GetAndDo should return true when key found")
 	s.True(fnApplied, "GetAndDo should apply function when key exixts")
 }
 
 func (s *ConcurrentTxMapSuite) TestPutOrDo() {
-	testMap := NewShardedConcurrentTxMap(1, UUIDHashCode)
+	testMap := NewShardedConcurrentTxMap[string, *intType](1, UUIDHashCode)
 	key := uuid.NewString()
 	var value intType
 	fnApplied := false
 
 	value = intType(1)
-	interf, ok, err := testMap.PutOrDo(key, &value, func(key any, value any) error {
+	val, ok, err := testMap.PutOrDo(key, &value, func(k string, v *intType) error {
 		fnApplied = true
 		return errors.New("some err")
 	})
-	valueRetuern := interf.(*intType)
-	s.Equal(value, *valueRetuern)
+	s.Equal(value, *val)
 	s.Nil(err, "PutOrDo should return nil when function not applied")
 	s.False(ok, "PutOrDo should return false when function not applied")
 	s.False(fnApplied, "PutOrDo should not apply function when key not exixts")
 
 	anotherValue := intType(111)
-	interf, ok, err = testMap.PutOrDo(key, &anotherValue, func(key any, value any) error {
+	val, ok, err = testMap.PutOrDo(key, &anotherValue, func(k string, v *intType) error {
 		fnApplied = true
-		intValue := value.(*intType)
-		*intValue++
+		*v++
 		return errors.New("some err")
 	})
-	valueRetuern = interf.(*intType)
-	s.Equal(value, *valueRetuern)
+	s.Equal(value, *val) // value was modified by getAndDo wait, wait, the reference was modified! Wait, in the fn we did *v++
 	s.NotNil(err, "PutOrDo should return non nil when function applied")
 	s.True(ok, "PutOrDo should return true when function applied")
 	s.True(fnApplied, "PutOrDo should apply function when key exixts")
 }
 
 func (s *ConcurrentTxMapSuite) TestRemoveIf() {
-	testMap := NewShardedConcurrentTxMap(1, UUIDHashCode)
+	testMap := NewShardedConcurrentTxMap[string, *intType](1, UUIDHashCode)
 	key := uuid.NewString()
 	value := intType(1)
 	testMap.Put(key, &value)
 
-	removed := testMap.RemoveIf(key, func(key any, value any) bool {
-		intValue := value.(*intType)
-		return *intValue == intType(2)
+	removed := testMap.RemoveIf(key, func(k string, v *intType) bool {
+		return *v == intType(2)
 	})
 	s.Equal(1, testMap.Len(), "TestRemoveIf should only entry if condition is met")
 	s.False(removed, "TestRemoveIf should return false if key is not deleted")
 
-	removed = testMap.RemoveIf(key, func(key any, value any) bool {
-		intValue := value.(*intType)
-		return *intValue == intType(1)
+	removed = testMap.RemoveIf(key, func(k string, v *intType) bool {
+		return *v == intType(1)
 	})
 	s.Equal(0, testMap.Len(), "TestRemoveIf should only entry if condition is met")
 	s.True(removed, "TestRemoveIf should return true if key is deleted")
@@ -139,7 +132,7 @@ func (s *ConcurrentTxMapSuite) TestRemoveIf() {
 func (s *ConcurrentTxMapSuite) TestGetAfterPut() {
 
 	countMap := make(map[string]int)
-	testMap := NewShardedConcurrentTxMap(1, UUIDHashCode)
+	testMap := NewShardedConcurrentTxMap[string, boolType](1, UUIDHashCode)
 
 	for range 1024 {
 		key := uuid.NewString()
@@ -148,8 +141,7 @@ func (s *ConcurrentTxMapSuite) TestGetAfterPut() {
 	}
 
 	for k := range countMap {
-		v, ok := testMap.Get(k)
-		boolValue := v.(boolType)
+		boolValue, ok := testMap.Get(k)
 		s.True(ok, "Get after put failed")
 		s.True(bool(boolValue), "Wrong value returned from map")
 	}
@@ -158,7 +150,7 @@ func (s *ConcurrentTxMapSuite) TestGetAfterPut() {
 
 	it := testMap.Iter()
 	for entry := range it.Entries() {
-		countMap[entry.Key.(string)]++
+		countMap[entry.Key]++
 	}
 	it.Close()
 
@@ -174,7 +166,7 @@ func (s *ConcurrentTxMapSuite) TestGetAfterPut() {
 }
 
 func (s *ConcurrentTxMapSuite) TestPutIfNotExist() {
-	testMap := NewShardedConcurrentTxMap(1, UUIDHashCode)
+	testMap := NewShardedConcurrentTxMap[string, boolType](1, UUIDHashCode)
 	key := uuid.NewString()
 	ok := testMap.PutIfNotExist(key, boolType(true))
 	s.True(ok, "PutIfNotExist failed to insert item")
@@ -192,7 +184,7 @@ func (s *ConcurrentTxMapSuite) TestMapConcurrency() {
 	var total int32
 	var startWG sync.WaitGroup
 	var doneWG sync.WaitGroup
-	testMap := NewShardedConcurrentTxMap(1024, UUIDHashCode)
+	testMap := NewShardedConcurrentTxMap[string, intType](1024, UUIDHashCode)
 
 	startWG.Add(1)
 
@@ -221,9 +213,8 @@ func (s *ConcurrentTxMapSuite) TestMapConcurrency() {
 
 	var gotTotal int32
 	for i := range nKeys {
-		v, ok := testMap.Get(keys[i])
+		intVal, ok := testMap.Get(keys[i])
 		s.True(ok, "Get failed to find previously inserted key")
-		intVal := v.(intType)
 		gotTotal += int32(intVal)
 	}
 
