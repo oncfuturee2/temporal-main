@@ -141,8 +141,9 @@ func (h *invocationTaskHandler) Execute(
 		ref,
 		(*Callback).saveResult,
 		saveResultInput{
-			result:      result,
-			retryPolicy: h.config.RetryPolicy(),
+			result:              result,
+			retryPolicy:         h.config.RetryPolicy(),
+			maxCallbackAttempts: h.config.MaxCallbackAttempts(),
 		},
 	)
 	return invokable.WrapError(result, saveErr)

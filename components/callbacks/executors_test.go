@@ -183,6 +183,9 @@ func TestProcessInvocationTaskNexus_Outcomes(t *testing.T) {
 						RetryPolicy: func() backoff.RetryPolicy {
 							return backoff.NewExponentialRetryPolicy(time.Second)
 						},
+						MaxCallbackAttempts: func() int {
+							return 10
+						},
 					},
 				},
 			))
@@ -249,6 +252,9 @@ func TestProcessBackoffTask(t *testing.T) {
 				RequestTimeout: dynamicconfig.GetDurationPropertyFnFilteredByDestination(time.Second),
 				RetryPolicy: func() backoff.RetryPolicy {
 					return backoff.NewExponentialRetryPolicy(time.Second)
+				},
+				MaxCallbackAttempts: func() int {
+					return 10
 				},
 			},
 		},
@@ -508,6 +514,9 @@ func TestProcessInvocationTaskChasm_Outcomes(t *testing.T) {
 					RequestTimeout: dynamicconfig.GetDurationPropertyFnFilteredByDestination(time.Second),
 					RetryPolicy: func() backoff.RetryPolicy {
 						return backoff.NewExponentialRetryPolicy(time.Second)
+					},
+					MaxCallbackAttempts: func() int {
+						return 10
 					},
 				},
 			}))

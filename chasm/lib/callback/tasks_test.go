@@ -182,6 +182,9 @@ func TestExecuteInvocationTaskNexus_Outcomes(t *testing.T) {
 					RetryPolicy: func() backoff.RetryPolicy {
 						return backoff.NewExponentialRetryPolicy(time.Second)
 					},
+					MaxCallbackAttempts: func() int {
+						return 10
+					},
 				},
 				namespaceRegistry: nsRegistry,
 				metricsHandler:    metricsHandler,
@@ -538,6 +541,9 @@ func TestExecuteInvocationTaskChasm_Outcomes(t *testing.T) {
 					RequestTimeout: dynamicconfig.GetDurationPropertyFnFilteredByDestination(time.Second),
 					RetryPolicy: func() backoff.RetryPolicy {
 						return backoff.NewExponentialRetryPolicy(time.Second)
+					},
+					MaxCallbackAttempts: func() int {
+						return 10
 					},
 				},
 				namespaceRegistry: nsRegistry,

@@ -5,6 +5,7 @@ import (
 )
 
 var (
-	RequestCounter          = chasmcallbacks.RequestCounter
-	RequestLatencyHistogram = chasmcallbacks.RequestLatencyHistogram
+	RequestCounter              = chasmcallbacks.RequestCounter
+	RequestLatencyHistogram     = chasmcallbacks.RequestLatencyHistogram
+	CallbackMaxAttemptsExceeded = chasmcallbacks.CallbackMaxAttemptsExceeded
 )

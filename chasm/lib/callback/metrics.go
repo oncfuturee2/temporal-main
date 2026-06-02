@@ -13,4 +13,8 @@ var (
 		"callback_outbound_latency",
 		metrics.WithDescription("Latency histogram of outbound callback requests made by the history service."),
 	)
+	CallbackMaxAttemptsExceeded = metrics.NewCounterDef(
+		"callback_max_attempts_exceeded",
+		metrics.WithDescription("The number of callbacks that exceeded the maximum retry attempts."),
+	)
 )

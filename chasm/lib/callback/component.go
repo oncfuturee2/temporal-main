@@ -109,8 +109,9 @@ func (c *Callback) loadInvocationArgs(
 }
 
 type saveResultInput struct {
-	result      invocationResult
-	retryPolicy backoff.RetryPolicy
+	result              invocationResult
+	retryPolicy         backoff.RetryPolicy
+	maxCallbackAttempts int
 }
 
 func (c *Callback) saveResult(
@@ -122,6 +123,14 @@ func (c *Callback) saveResult(
 		err := TransitionSucceeded.Apply(c, ctx, EventSucceeded{Time: ctx.Now(c)})
 		return nil, err
 	case invocationResultRetry:
+		if c.Attempt >= int32(input.maxCallbackAttempts) {
+			ctx.MetricsHandler().Counter(CallbackMaxAttemptsExceeded.Name()).Record(1)
+			err := TransitionFailed.Apply(c, ctx, EventFailed{
+				Time: ctx.Now(c),
+				Err:  fmt.Errorf("callback exceeded max attempts (%d)", input.maxCallbackAttempts),
+			})
+			return nil, err
+		}
 		err := TransitionAttemptFailed.Apply(c, ctx, EventAttemptFailed{
 			Time:        ctx.Now(c),
 			Err:         r.err,

@@ -193,6 +193,13 @@ func (e taskExecutor) saveResult(
 					Time: env.Now(),
 				})
 			case invocationResultRetry:
+				if callback.Attempt >= int32(e.Config.MaxCallbackAttempts()) {
+					e.MetricsHandler.Counter(CallbackMaxAttemptsExceeded.Name()).Record(1)
+					return TransitionFailed.Apply(callback, EventFailed{
+						Time: env.Now(),
+						Err:  fmt.Errorf("callback exceeded max attempts (%d)", e.Config.MaxCallbackAttempts()),
+					})
+				}
 				return TransitionAttemptFailed.Apply(callback, EventAttemptFailed{
 					Time:        env.Now(),
 					Err:         result.error(),
